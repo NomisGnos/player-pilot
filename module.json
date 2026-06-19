@@ -1,0 +1,36 @@
+{
+  "id": "player-pilot",
+  "title": "Player Pilot",
+  "description": "Mobile-first player controls for Foundry VTT: actor actions, spells, features, token movement, targeting, map pings, rests, and table-facing requests.",
+  "version": "0.1.30",
+  "authors": [
+    {
+      "name": "Simon",
+      "flags": {}
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14.360",
+    "maximum": "14"
+  },
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json",
+      "flags": {}
+    }
+  ],
+  "esmodules": [
+    "scripts/player-pilot.js"
+  ],
+  "styles": [
+    {
+      "src": "styles/player-pilot.css"
+    }
+  ],
+  "socket": true,
+  "type": "module",
+  "flags": {}
+}

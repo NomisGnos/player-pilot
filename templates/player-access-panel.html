@@ -1,0 +1,26 @@
+<form class="pp-access-panel">
+  <header class="pp-access-header">
+    <h2>Player Pilot Access</h2>
+    <p>Choose which players should load the mobile interface after they log in.</p>
+  </header>
+
+  <ol class="pp-access-list">
+    {{#each players}}
+    <li class="pp-access-row" data-user-id="{{this.id}}">
+      <span class="pp-access-avatar" style="background-image:url('{{this.avatar}}')"></span>
+      <span class="pp-access-name">{{this.name}}</span>
+      <label class="pp-switch">
+        <input type="checkbox" name="enabled.{{this.id}}" {{#if this.enabled}}checked{{/if}}>
+        <span></span>
+      </label>
+    </li>
+    {{/each}}
+  </ol>
+
+  <footer class="pp-access-actions">
+    <button type="submit">
+      <i class="fas fa-save"></i>
+      {{localize "PlayerPilot.panel.save"}}
+    </button>
+  </footer>
+</form>
