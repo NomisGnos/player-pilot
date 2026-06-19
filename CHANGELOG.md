@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.0
+
+- Promoted PF2e from generic fallback behavior to a native system adapter while leaving the D&D5e adapter behavior intact.
+- Added PF2e one-, two-, and three-action grouping plus reactions, free actions, passive abilities, and native Strike cards.
+- Added PF2e Strike attack variants for multiple-attack penalties, target prompting, damage, and critical-damage rolls.
+- Added PF2e spellcasting through spellcasting entries so prepared slots, spontaneous slots, signature heightening, innate uses, cantrips, rituals, and Focus Points use the system's own casting logic.
+- Added PF2e spell attack, multiple-attack, damage, heightening, defense, rank, range, area, target, trait, and duration presentation.
+- Consolidated PF2e spell attacks and their MAP -5/-10 choices into one roll card, and collapsed multi-component spell damage into one native Damage action.
+- Added PF2e Perception, skill, save, initiative, and recovery rolls through native statistics.
+- Added a PF2e initiative picker for Perception or any actor skill and made quick-roll buttons bypass hidden native modifier dialogs.
+- Replaced D&D-only status controls in PF2e worlds with Hero Points, Focus Points, Dying, Wounded, Doomed, Recovery Check, and Rest for the Night controls.
+- Made PF2e Dying, Wounded, Doomed, recovery DC, ability labels, and Land/Climb/Fly/Swim speeds mirror the prepared actor data used by the native sheet.
+- Routed PF2e Rest for the Night to the connected GM so its native confirmation appears on the GM screen, with a Player Pilot confirmation fallback when no GM is connected.
+- Added PF2e-native inventory carry changes with one-hand, two-hand, worn/equipped, carried, stowed, and dropped choices, plus consumable use, quantity handling, containers, and coin adjustments.
+- Added PF2e spell/action use counters beside Use and added the same counter to D&D5e feature cards shown in Actions.
+- Added PF2e-specific action, spell, feature, and inventory filters.
+- Added system-logo and world-title loading branding, a warning that the screen may briefly go blank, and automatic closing of the stray User Configuration window for Player Pilot users.
+- Kept movement, targeting, GM proxying, map snapshots, and table controls shared across both supported systems.
+
 ## v0.1.30
 
 - Kept the startup loader attached when Foundry replaces or repaints its page body during a hard refresh.

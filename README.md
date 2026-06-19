@@ -1,8 +1,8 @@
 # Player Pilot
 
-[![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v13--v14.360-orange?style=for-the-badge)](https://foundryvtt.com/)
-[![D&D5e](https://img.shields.io/badge/D%26D5e-first-red?style=for-the-badge)](https://foundryvtt.com/packages/dnd5e)
-[![PF2e](https://img.shields.io/badge/PF2e-starter%20support-blue?style=for-the-badge)](https://foundryvtt.com/packages/pf2e)
+[![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v13--v14.363-orange?style=for-the-badge)](https://foundryvtt.com/)
+[![D&D5e](https://img.shields.io/badge/D%26D5e-native-red?style=for-the-badge)](https://foundryvtt.com/packages/dnd5e)
+[![PF2e](https://img.shields.io/badge/PF2e-native-blue?style=for-the-badge)](https://foundryvtt.com/packages/pf2e)
 [![Patreon](https://img.shields.io/badge/Patreon-drop%20a%20goodberry-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/nomisDM)
 
 Player Pilot is a mobile-first character control module for Foundry VTT.
@@ -30,6 +30,7 @@ Players log in normally. If they are enabled for Player Pilot, the module covers
 The shell has tabs for:
 
 - `Actions`: quick rolls and usable actions.
+- `Rolls`: system-native checks, saves, skills, Perception, and similar statistics.
 - `Spells`: actor spells, grouped from the system item data.
 - `Features`: class features, feats, actions, and similar actor abilities.
 - `Inventory`: inventory items, equipment, consumables, tools, and weapons.
@@ -39,13 +40,17 @@ The shell has tabs for:
 
 - Mobile shell for selected non-GM users.
 - Owned actor switching.
-- HP, AC, speed, level, proficiency, exhaustion, and death-save status.
-- Exhaustion and death-save counters can be adjusted from the mobile shell.
+- HP, AC, system-native speed breakdowns, level, initiative, and system-specific character resources.
+- D&D5e exhaustion and death-save controls.
+- PF2e Hero Points, Focus Points, Dying, Wounded, Doomed, recovery DC, and Recovery Check controls.
 - D&D5e-focused item use through `item.use()` when available.
-- PF2e/generic fallback item use through `item.use()`, `item.roll()`, or chat output.
-- Skill, save, ability, death-save, and initiative roll buttons where the system exposes roll methods.
+- PF2e-native actions, reactions, free actions, feats, and consumable use.
+- PF2e-native Strikes with multiple-attack variants, damage, critical damage, and target proxying.
+- PF2e spellcasting through the actor's spellcasting entries, including prepared, spontaneous, innate, focus, cantrip, ritual, and signature-spell behavior.
+- Skill, save, ability, death-save, and initiative roll buttons where the system exposes roll methods, including PF2e initiative selection by Perception or skill.
 - Manual d20 entry for table dice rolls, with the modifier shown before the player submits.
-- Short rest and long rest controls in the Actions tab.
+- D&D5e short-rest and long-rest controls.
+- PF2e Rest for the Night with its confirmation routed to the connected GM.
 - D-pad token movement.
 - Player-first movement with GM fallback.
 - GM-authoritative socket routing when player-side execution is not available.
@@ -53,15 +58,19 @@ The shell has tabs for:
 - Target proxying for GM-executed item use.
 - Ping the active token and use Ping On Map snapshots.
 - Ping On Map snapshot request and tap-to-ping workflow.
-- Prepared spell toggle where the system exposes prepared spell state.
+- D&D5e prepared-spell toggles.
+- PF2e prepared-slot availability and native slot expenditure without applying D&D preparation rules.
 - Optional combat-turn lock for tables that only want the active combatant acting.
 - Prepared spells, cantrips, at-will, innate, pact, and always-available spells are shown in the Spells tab.
 - Spell slots are shown in the Spells tab.
 - Inventory with quantity can be adjusted from the Inventory tab.
+- PF2e inventory carry choices for held in one hand, held in two hands, worn/equipped, carried, stowed, or dropped.
+- Limited-use counters beside Use for PF2e spells/actions and D&D5e feature cards in Actions.
 - Items inside containers are grouped by container name when the system data exposes that link.
 - Shift-click or Alt-click a journal image as GM to share it with Player Pilot users.
 - Optional player audio suppression.
 - Optional no-canvas mode for enabled players.
+- A branded startup screen showing the active system logo and world title, including a note that the display may briefly go blank while Foundry loads.
 
 ## Settings
 
@@ -87,17 +96,17 @@ Players are not treated as beginners. The UI keeps common choices close by, but 
 
 ## Compatibility
 
-Player Pilot starts with D&D5e as the strongest system target.
+Player Pilot has native adapters for D&D5e and PF2e. The D&D path remains isolated from PF2e-specific actions, spellcasting, recovery, resources, equipment, and currency behavior.
 
-PF2e has starter support through a system adapter. It reads common actor/item structures and tries public roll/use methods when the PF2e system exposes them. Some PF2e action details will need table testing and follow-up passes.
+The current compatibility targets are D&D5e 5.3.3 and PF2e 8.2.0 on Foundry VTT 14.363. The shared movement, targeting, map, and GM-proxy features are system-independent; actor mechanics are routed through the active system adapter.
 
 Other systems may show actors and items through the generic adapter, but they are not complete yet.
 
 ## Known Limits
 
 - This is a first build of a large replacement module.
-- D&D5e should be tested first.
-- PF2e support is present, but not yet as deep as D&D5e.
+- D&D5e and PF2e both require in-world testing after system updates because their public document APIs can change.
+- Rare PF2e subsystems such as complex crafting abilities, eidolons, companions, vehicles, armies, and campaign-specific sheets may still fall back to item chat cards.
 - Ping On Map is approximate. It is for "around here" pings, not precision measurement.
 - Player-first movement depends on token permissions and the system/world setup. If local movement fails, the request goes to the GM.
 - A connected GM client is still recommended for the best experience.

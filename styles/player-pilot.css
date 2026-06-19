@@ -15,6 +15,12 @@
   --pp-tap: 46px;
 }
 
+html.player-pilot-booting,
+html.player-pilot-booting body {
+  min-height: 100%;
+  background: #071017 !important;
+}
+
 body.player-pilot-active {
   overflow: hidden !important;
   background: #071017 !important;
@@ -80,6 +86,34 @@ body.player-pilot-active #pause {
   box-shadow: 0 0 28px rgba(98, 199, 178, 0.25);
 }
 
+.pp-boot-system-logo {
+  display: block;
+  width: min(250px, 76vw);
+  max-height: 92px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.42));
+}
+
+.pp-boot-system-logo[hidden] {
+  display: none;
+}
+
+.pp-boot-world {
+  display: grid;
+  gap: 2px;
+}
+
+.pp-boot-world strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+.pp-boot-world span {
+  color: #9ef1df;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .pp-boot-card h1,
 .pp-boot-card p {
   margin: 0;
@@ -88,6 +122,12 @@ body.player-pilot-active #pause {
 .pp-boot-card p {
   min-height: 1.3em;
   color: #c5d1d9;
+}
+
+.pp-boot-card .pp-boot-note {
+  min-height: 0;
+  color: #9eabb4;
+  font-size: 0.76rem;
 }
 
 .pp-boot-track {
@@ -4065,5 +4105,194 @@ body.player-pilot-active #notifications > .notification.error {
 
   .pp-spell-level-header .pp-level-slot {
     width: clamp(96px, 29vw, 130px);
+  }
+}
+
+/* PF2e adapter controls remain isolated from the D&D card layout. */
+.pp-strike-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pp-strike-actions .pp-action-btn {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.pp-pf2e-resource-strip {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+}
+
+.pp-detail-strip .pp-action-btn {
+  width: auto;
+  min-width: 30px;
+  padding-inline: 9px;
+  white-space: nowrap;
+}
+
+.pp-stats-page .pp-death-strip {
+  grid-template-columns: auto minmax(90px, 1fr) auto auto auto;
+}
+
+@media (max-width: 430px) {
+  .pp-stats-page .pp-death-strip {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .pp-stats-page .pp-death-strip > strong {
+    font-size: 0.72rem;
+  }
+
+  .pp-stats-page .pp-death-strip .pp-action-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+/* PF2e native-state correction pass. */
+.pp-system-pf2e .pp-status-grid .pp-stat.speed {
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  justify-items: start;
+  min-height: 48px !important;
+  text-align: left;
+}
+
+.pp-system-pf2e .pp-stat.speed .pp-stat-copy {
+  min-width: 0;
+}
+
+.pp-system-pf2e .pp-stat.speed strong {
+  display: block;
+  font-size: 0.82rem !important;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.pp-pf2e-condition-panel {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  color: var(--pp-text);
+  background: #151d24;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 4px;
+}
+
+.pp-pf2e-condition-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pp-pf2e-condition-values > span {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+  padding: 7px;
+  background: #0d141a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.pp-pf2e-condition-values i {
+  grid-row: span 2;
+  color: #ffaaa4;
+}
+
+.pp-pf2e-condition-values b {
+  color: var(--pp-muted);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+}
+
+.pp-pf2e-condition-values strong {
+  font-size: 0.9rem;
+}
+
+.pp-pf2e-condition-panel > .pp-action-btn {
+  width: 100%;
+  min-height: 34px;
+}
+
+.pp-pf2e-condition-panel > small {
+  color: var(--pp-muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.pp-carry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  max-width: 150px;
+  padding: 3px 7px;
+  color: #dff8f2;
+  background: rgba(48, 124, 102, 0.34);
+  border: 1px solid rgba(98, 199, 178, 0.58);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.pp-carry-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-choice-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+}
+
+.pp-choice-list .pp-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+
+.pp-carry-choices .pp-button {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+@media (max-width: 430px) {
+  .pp-pf2e-condition-values {
+    grid-template-columns: 1fr;
+  }
+
+  .pp-pf2e-condition-values > span {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .pp-pf2e-condition-values i {
+    grid-row: auto;
+  }
+}
+
+.pp-roll-instruction-actions.pp-native-choice-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pp-native-choice-actions .pp-button {
+  min-width: 0;
+  padding-inline: 6px;
+  font-size: 0.76rem;
+  white-space: normal;
+}
+
+@media (max-width: 430px) {
+  .pp-roll-instruction-actions.pp-native-choice-actions {
+    grid-template-columns: 1fr;
   }
 }
