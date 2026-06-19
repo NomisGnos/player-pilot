@@ -2,6 +2,11 @@
 
 ## v0.2.0
 
+- Limited the Player Pilot loading screen to activated non-GM Player Pilot users; GMs and unselected players no longer receive the startup overlay.
+- Surfaced important Foundry, D&D5e, and automation confirmation dialogs above the Player Pilot shell with Player Pilot styling while preserving their original buttons and callbacks.
+- Fixed D&D5e 5.3.3 skill, ability-check, saving-throw, and death-save calls to use the current roll API and skip the obscured native configuration dialog.
+- Added immediate D&D roll-total feedback after native rolls and corrected exhaustion refreshes that could display one change behind.
+- Rebuilt the D&D death-save Details control into two readable success/failure blocks with a separate reset action.
 - Promoted PF2e from generic fallback behavior to a native system adapter while leaving the D&D5e adapter behavior intact.
 - Added PF2e one-, two-, and three-action grouping plus reactions, free actions, passive abilities, and native Strike cards.
 - Added PF2e Strike attack variants for multiple-attack penalties, target prompting, damage, and critical-damage rolls.

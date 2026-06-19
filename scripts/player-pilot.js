@@ -3,9 +3,8 @@ const SOCKET = `module.${MODULE_ID}`;
 const OWNER = 3;
 const DND_ICON_ROOT = `modules/${MODULE_ID}/assets/dnd5e/svg`;
 
-document.documentElement?.classList?.add?.("player-pilot-booting");
-
 const bootState = {
+  enabled: false,
   screen: null,
   progress: 6,
   timer: null,
@@ -42,6 +41,7 @@ function updateBootBranding(screen = bootState.screen) {
 }
 
 function ensureBootScreen() {
+  if (!bootState.enabled) return null;
   if (bootState.screen?.isConnected) return bootState.screen;
   if (!document.body) {
     document.addEventListener("DOMContentLoaded", ensureBootScreen, { once: true });
@@ -80,13 +80,22 @@ function ensureBootScreen() {
 }
 
 function keepBootScreenAttached() {
-  if (bootState.observer || !document.documentElement) return;
+  if (!bootState.enabled || bootState.observer || !document.documentElement) return;
   bootState.observer = new MutationObserver(() => {
-    if (!document.documentElement.classList.contains("player-pilot-booting")) return;
+    if (!bootState.enabled || !document.documentElement.classList.contains("player-pilot-booting")) return;
     if (bootState.screen?.isConnected) return;
     window.queueMicrotask(ensureBootScreen);
   });
   bootState.observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function startBootScreen() {
+  if (bootState.enabled) return ensureBootScreen();
+  bootState.enabled = true;
+  document.documentElement?.classList?.add?.("player-pilot-booting");
+  const screen = ensureBootScreen();
+  keepBootScreenAttached();
+  return screen;
 }
 
 function updateBootProgress(progress, label = "") {
@@ -102,6 +111,7 @@ function updateBootProgress(progress, label = "") {
 }
 
 function removeBootScreen() {
+  bootState.enabled = false;
   if (bootState.timer) window.clearInterval(bootState.timer);
   bootState.timer = null;
   bootState.observer?.disconnect?.();
@@ -110,9 +120,6 @@ function removeBootScreen() {
   bootState.screen = null;
   document.documentElement?.classList?.remove?.("player-pilot-booting");
 }
-
-ensureBootScreen();
-keepBootScreenAttached();
 
 const TABS = [
   ["stats", "Details", "fa-chart-simple"],
@@ -159,7 +166,8 @@ const state = {
   suppressSceneRenderUntil: 0,
   lastSceneReceivedAt: 0,
   modelCache: null,
-  resolutionWarningObserver: null
+  resolutionWarningObserver: null,
+  nativePromptObserver: null
 };
 
 const BLOCKED_WHILE_PAUSED = new Set([
@@ -1219,7 +1227,7 @@ const DND5E_ADAPTER = {
     const pact = spells.pact;
     const level = Number(system.details?.level ?? getDndTotalLevel(actor) ?? 0);
     const exhaustion = readExhaustionValue(actor);
-    const death = system.attributes?.death ?? {};
+    const death = actor?._source?.system?.attributes?.death ?? system.attributes?.death ?? {};
     const deathText = `Successes ${Number(death.success ?? 0)}, Failures ${Number(death.failure ?? 0)}`;
     return {
       name: actor?.name ?? "Actor",
@@ -1370,27 +1378,27 @@ const DND5E_ADAPTER = {
   },
   async rollCheck(actor, kind, key) {
     if (kind === "initiative" && typeof actor.rollInitiative === "function") {
-      return actor.rollInitiative({ createCombatants: true, configure: false });
+      return actor.rollInitiative({ createCombatants: true });
     }
     if (kind === "deathSave" && typeof actor.rollDeathSave === "function") {
-      return actor.rollDeathSave({ configure: false });
+      return actor.rollDeathSave({ legacy: false }, { configure: false });
     }
     if (kind === "skill") {
+      if (typeof actor.rollSkill === "function") return actor.rollSkill({ skill: key }, { configure: false });
       const entry = actor.system?.skills?.[key] ?? actor.skills?.[key];
       if (await rollActorEntry(entry)) return;
-      if (typeof actor.rollSkill === "function") return actor.rollSkill(key, { configure: false });
     }
     if (kind === "abilityCheck") {
+      if (typeof actor.rollAbilityCheck === "function") return actor.rollAbilityCheck({ ability: key }, { configure: false });
+      if (typeof actor.rollAbilityTest === "function") return actor.rollAbilityTest(key, { configure: false });
       const entry = actor.system?.abilities?.[key] ?? actor.abilities?.[key];
       if (await rollActorEntry(entry?.check ?? entry)) return;
-      if (typeof actor.rollAbilityTest === "function") return actor.rollAbilityTest(key, { configure: false });
-      if (typeof actor.rollAbilityCheck === "function") return actor.rollAbilityCheck(key, { configure: false });
     }
     if (kind === "abilitySave") {
+      if (typeof actor.rollSavingThrow === "function") return actor.rollSavingThrow({ ability: key }, { configure: false });
+      if (typeof actor.rollAbilitySave === "function") return actor.rollAbilitySave(key, { configure: false });
       const entry = actor.system?.abilities?.[key] ?? actor.abilities?.[key];
       if (await rollActorEntry(entry?.save ?? entry?.savingThrow ?? entry)) return;
-      if (typeof actor.rollAbilitySave === "function") return actor.rollAbilitySave(key, { configure: false });
-      if (typeof actor.rollSavingThrow === "function") return actor.rollSavingThrow(key, { configure: false });
     }
     return GENERIC_ADAPTER.rollCheck(actor, kind, key);
   }
@@ -2537,11 +2545,14 @@ function revealPilotShell() {
 function unmountPilotShell() {
   document.body.classList.remove("player-pilot-active");
   document.body.classList.remove("player-pilot-modal-open");
+  document.body.classList.remove("player-pilot-native-prompt-open");
   removeBootScreen();
   state.shell?.remove();
   state.shell = null;
   state.resolutionWarningObserver?.disconnect?.();
   state.resolutionWarningObserver = null;
+  state.nativePromptObserver?.disconnect?.();
+  state.nativePromptObserver = null;
   invalidateModelCache();
 }
 
@@ -2765,13 +2776,16 @@ function renderStatsView(model) {
   ` : "";
   const deathControls = model.adapter.id === "dnd5e" ? `
     <div class="pp-detail-strip pp-death-strip">
-      <i class="fas fa-skull-crossbones"></i>
-      <span>Death Saves</span>
-      <button class="success" type="button" data-action="death-save" data-kind="success" title="Add success"><i class="fas fa-thumbs-up"></i></button>
-      <strong>${escapeHtml(summary.deathSuccess ?? 0)}</strong>
-      <button class="failure" type="button" data-action="death-save" data-kind="failure" title="Add failure"><i class="fas fa-thumbs-down"></i></button>
-      <strong>${escapeHtml(summary.deathFailure ?? 0)}</strong>
-      <button type="button" data-action="death-save" data-kind="reset" title="Reset death saves"><i class="fas fa-rotate-left"></i></button>
+      <div class="pp-death-title"><i class="fas fa-skull-crossbones"></i><span>Death Saves</span></div>
+      <div class="pp-death-save-actions">
+        <button class="pp-death-result success" type="button" data-action="death-save" data-kind="success" title="Add a death save success">
+          <i class="fas fa-thumbs-up"></i><span>Successes</span><strong>${escapeHtml(summary.deathSuccess ?? 0)} / 3</strong>
+        </button>
+        <button class="pp-death-result failure" type="button" data-action="death-save" data-kind="failure" title="Add a death save failure">
+          <i class="fas fa-thumbs-down"></i><span>Failures</span><strong>${escapeHtml(summary.deathFailure ?? 0)} / 3</strong>
+        </button>
+        <button class="pp-death-reset" type="button" data-action="death-save" data-kind="reset" title="Reset death saves" aria-label="Reset death saves"><i class="fas fa-rotate-left"></i></button>
+      </div>
     </div>
   ` : "";
   const pf2eControls = model.adapter.id === "pf2e" ? `
@@ -5391,12 +5405,30 @@ async function rollCheck(kind, key) {
   }
   const actor = currentActor();
   if (!actor) return;
-  await executePlayerFirst(
+  let rollResult = null;
+  const executed = await executePlayerFirst(
     `Roll ${kind}`,
-    async () => systemAdapter(actor).rollCheck(actor, kind, key),
+    async () => {
+      rollResult = await systemAdapter(actor).rollCheck(actor, kind, key);
+      return rollResult;
+    },
     "rollCheck",
     { actorId: actor.id, kind, key }
   );
+  if (executed && rollResult) showNativeRollResult(rollResult, kind, key);
+}
+
+function showNativeRollResult(result, kind = "roll", key = "") {
+  const candidates = Array.isArray(result)
+    ? result
+    : (Array.isArray(result?.rolls) ? result.rolls : [result?.roll ?? result]);
+  const roll = candidates.find((entry) => Number.isFinite(Number(entry?.total)));
+  if (!roll) return;
+  const actor = currentActor();
+  const check = cachedModel(actor)?.groups?.checks?.find((entry) => entry.kind === kind && entry.key === key);
+  const label = check?.name ?? capitalizeWords(`${key || kind} ${kind === "skill" ? "check" : ""}`.trim());
+  const formula = String(roll.formula ?? roll._formula ?? "");
+  showResultToast(`${label}: ${Number(roll.total)}`, formula);
 }
 
 function parseD20Mod(formula) {
@@ -5657,13 +5689,20 @@ async function updateExhaustion(delta) {
   if (!actor || !Number.isFinite(delta) || delta === 0) return;
   const current = readExhaustionValue(actor);
   const next = clamp(current + delta, 0, 6);
-  await executePlayerFirst(
+  const updated = await executePlayerFirst(
     `Exhaustion ${next}`,
     async () => actor.update(exhaustionUpdateData(actor, next)),
     "updateActorData",
     { actorId: actor.id, updates: exhaustionUpdateData(actor, next), label: `Exhaustion ${next}` }
   );
-  window.setTimeout(queueRender, 50);
+  if (updated) {
+    invalidateModelCache();
+    queueRender();
+    window.setTimeout(() => {
+      invalidateModelCache();
+      queueRender();
+    }, 250);
+  }
 }
 
 async function updatePf2eResource(resource, delta) {
@@ -5686,7 +5725,7 @@ async function updatePf2eResource(resource, delta) {
 }
 
 function readExhaustionValue(actor) {
-  const raw = actor?.system?.attributes?.exhaustion;
+  const raw = actor?._source?.system?.attributes?.exhaustion ?? actor?.system?.attributes?.exhaustion;
   const value = typeof raw === "object" && raw !== null ? raw.value : raw;
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -5712,7 +5751,7 @@ async function updateDeathSaves(kind) {
     success = 0;
     failure = 0;
   }
-  await executePlayerFirst(
+  const updated = await executePlayerFirst(
     "Death saves",
     async () => actor.update({ "system.attributes.death.success": success, "system.attributes.death.failure": failure }),
     "updateActorData",
@@ -5722,7 +5761,10 @@ async function updateDeathSaves(kind) {
       label: "Death saves"
     }
   );
-  window.setTimeout(queueRender, 50);
+  if (updated) {
+    invalidateModelCache();
+    queueRender();
+  }
 }
 
 async function requestRest(restType) {
@@ -7267,14 +7309,88 @@ function closePilotUserConfiguration(app) {
   });
 }
 
+function applicationRoot(app, html = null) {
+  const fromHook = html instanceof HTMLElement ? html : html?.[0];
+  if (fromHook instanceof HTMLElement) return fromHook;
+  const fromApp = app?.element instanceof HTMLElement ? app.element : app?.element?.[0];
+  return fromApp instanceof HTMLElement ? fromApp : null;
+}
+
+function pilotPromptSignal(app, root) {
+  if (!(root instanceof HTMLElement)) return false;
+  if (root.matches(".player-pilot-shell, .pp-modal, .pp-boot-screen") || root.closest(".player-pilot-shell, .pp-modal")) return false;
+  const identity = [
+    app?.constructor?.name,
+    app?.id,
+    app?.options?.id,
+    app?.title,
+    root.id,
+    root.className,
+    root.querySelector(".window-title")?.textContent
+  ].map((value) => String(value ?? "")).join(" ");
+  if (/UserConfig|UserConfiguration|player-pilot-access/i.test(identity)) return false;
+  const footer = root.querySelector("footer.form-footer, [data-application-part='footer'], .dialog-buttons");
+  const buttons = footer?.querySelectorAll?.("button, [type='submit']") ?? [];
+  if (!footer || buttons.length < 1) return false;
+  const explicitDialog = /Dialog|Prompt|Confirm/i.test(identity)
+    || !!root.querySelector(".dialog-content, #dialog-app, .cpr-dialog, [data-application-part='form'].dialog-content");
+  return explicitDialog;
+}
+
+function syncPilotPromptBackdrop() {
+  if (!userIsPilot()) {
+    document.body?.classList?.remove?.("player-pilot-native-prompt-open");
+    return;
+  }
+  const open = !!document.querySelector(".application.pp-native-prompt, .window-app.pp-native-prompt");
+  document.body?.classList?.toggle?.("player-pilot-native-prompt-open", open);
+}
+
+function surfacePilotPrompt(app, html = null) {
+  if (!userIsPilot()) return;
+  const root = applicationRoot(app, html);
+  if (!pilotPromptSignal(app, root)) return;
+  root.classList.add("pp-native-prompt");
+  root.setAttribute("aria-modal", "true");
+  root.dataset.ppNativePrompt = "1";
+  syncPilotPromptBackdrop();
+  window.requestAnimationFrame(() => {
+    if (!root.isConnected) return;
+    root.querySelector("button[autofocus], footer button, [data-application-part='footer'] button")?.focus?.({ preventScroll: true });
+  });
+}
+
+function installPilotPromptObserver() {
+  if (!userIsPilot() || state.nativePromptObserver || !document.body) return;
+  const inspect = (node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.matches(".application, .window-app")) surfacePilotPrompt(null, node);
+    node.querySelectorAll?.(".application, .window-app").forEach((element) => surfacePilotPrompt(null, element));
+  };
+  document.querySelectorAll(".application, .window-app").forEach((element) => surfacePilotPrompt(null, element));
+  state.nativePromptObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach(inspect);
+    }
+    window.queueMicrotask(syncPilotPromptBackdrop);
+  });
+  state.nativePromptObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 function registerHooks() {
   Hooks.on("renderUserConfig", closePilotUserConfiguration);
   Hooks.on("renderApplicationV2", closePilotUserConfiguration);
+  Hooks.on("renderApplicationV2", surfacePilotPrompt);
+  Hooks.on("closeApplicationV2", () => window.queueMicrotask(syncPilotPromptBackdrop));
+  Hooks.on("renderDialog", surfacePilotPrompt);
+  Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.once("init", () => {
     registerSettings();
-    updateBootBranding();
-    if (userIsPilot()) updateBootProgress(34, "Loading Player Pilot settings...");
-    else removeBootScreen();
+    if (userIsPilot()) {
+      startBootScreen();
+      updateBootBranding();
+      updateBootProgress(34, "Loading Player Pilot settings...");
+    } else removeBootScreen();
     installAudioSuppression();
     installChatModeBridge();
     Hooks.on("canvasInit", () => {
@@ -7285,6 +7401,7 @@ function registerHooks() {
     if (!userIsPilot()) return;
     updateBootBranding();
     updateBootProgress(72, "Preparing your character controls...");
+    installPilotPromptObserver();
     mountPilotShell();
   });
   Hooks.once("ready", async () => {
@@ -7298,6 +7415,7 @@ function registerHooks() {
     await enforceNoCanvasIfNeeded();
     if (userIsPilot()) {
       installMobileResolutionWarningSuppression();
+      installPilotPromptObserver();
       mountPilotShell();
       requestSceneState(true);
       revealPilotShell();

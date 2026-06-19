@@ -26,6 +26,151 @@ body.player-pilot-active {
   background: #071017 !important;
 }
 
+body.player-pilot-active.player-pilot-native-prompt-open::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483090;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.76);
+  backdrop-filter: blur(2px);
+}
+
+body.player-pilot-active .application.pp-native-prompt,
+body.player-pilot-active .window-app.pp-native-prompt {
+  position: fixed !important;
+  inset: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  z-index: 2147483100 !important;
+  display: flex !important;
+  flex-direction: column;
+  width: min(520px, calc(100vw - 24px)) !important;
+  min-width: 0 !important;
+  height: auto !important;
+  max-height: min(78vh, 680px) !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  color: var(--pp-text) !important;
+  background:
+    linear-gradient(180deg, rgba(98, 199, 178, 0.09), transparent 42%),
+    #111a21 !important;
+  border: 1px solid rgba(98, 199, 178, 0.58) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68) !important;
+  transform: translate(-50%, -50%) !important;
+  font-family: "Signika", system-ui, sans-serif !important;
+}
+
+body.player-pilot-active .pp-native-prompt > .window-header {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 9px 12px !important;
+  color: #ffffff !important;
+  background: #18242d !important;
+  border-bottom: 1px solid rgba(98, 199, 178, 0.34) !important;
+}
+
+body.player-pilot-active .pp-native-prompt .window-title {
+  min-width: 0;
+  margin: 0 !important;
+  color: #ffffff !important;
+  font-size: 1.08rem !important;
+  font-weight: 900 !important;
+  line-height: 1.2;
+}
+
+body.player-pilot-active .pp-native-prompt .window-header .header-control:not([data-action="close"]) {
+  display: none !important;
+}
+
+body.player-pilot-active .pp-native-prompt .window-header [data-action="close"] {
+  color: var(--pp-muted) !important;
+}
+
+body.player-pilot-active .pp-native-prompt > .window-content {
+  flex: 1 1 auto;
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden !important;
+  color: var(--pp-text) !important;
+  background: transparent !important;
+}
+
+body.player-pilot-active .pp-native-prompt .dialog-content,
+body.player-pilot-active .pp-native-prompt [data-application-part="form"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 22px 18px !important;
+  overflow: auto !important;
+  color: var(--pp-text) !important;
+  background: transparent !important;
+  font-size: 1rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+body.player-pilot-active .pp-native-prompt .dialog-content p,
+body.player-pilot-active .pp-native-prompt .content {
+  margin: 0 !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-active .pp-native-prompt footer.form-footer,
+body.player-pilot-active .pp-native-prompt [data-application-part="footer"],
+body.player-pilot-active .pp-native-prompt .dialog-buttons {
+  flex: 0 0 auto;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 9px !important;
+  padding: 12px !important;
+  background: #0c141a !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+body.player-pilot-active .pp-native-prompt footer button,
+body.player-pilot-active .pp-native-prompt [data-application-part="footer"] button,
+body.player-pilot-active .pp-native-prompt .dialog-buttons button {
+  width: 100% !important;
+  min-height: 46px !important;
+  margin: 0 !important;
+  padding: 9px 12px !important;
+  color: #f4f8fa !important;
+  background: #273743 !important;
+  border: 1px solid rgba(157, 215, 255, 0.38) !important;
+  border-radius: 5px !important;
+  font-size: 0.96rem !important;
+  font-weight: 900 !important;
+}
+
+body.player-pilot-active .pp-native-prompt footer button:first-child,
+body.player-pilot-active .pp-native-prompt [data-application-part="footer"] button:first-child,
+body.player-pilot-active .pp-native-prompt .dialog-buttons button:first-child {
+  color: #06231f !important;
+  background: var(--pp-accent) !important;
+  border-color: #9ef1df !important;
+}
+
+body.player-pilot-active .pp-native-prompt footer button[name="false"],
+body.player-pilot-active .pp-native-prompt [data-application-part="footer"] button[name="false"] {
+  color: #d9e1e6 !important;
+  background: #263139 !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+@media (max-width: 430px) {
+  body.player-pilot-active .application.pp-native-prompt,
+  body.player-pilot-active .window-app.pp-native-prompt {
+    top: auto !important;
+    bottom: max(12px, env(safe-area-inset-bottom)) !important;
+    width: calc(100vw - 20px) !important;
+    max-height: min(82vh, 680px) !important;
+    transform: translateX(-50%) !important;
+  }
+}
+
 html.player-pilot-booting #board,
 html.player-pilot-booting canvas#board,
 html.player-pilot-booting #canvas,
@@ -4133,21 +4278,76 @@ body.player-pilot-active #notifications > .notification.error {
 }
 
 .pp-stats-page .pp-death-strip {
-  grid-template-columns: auto minmax(90px, 1fr) auto auto auto;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.pp-death-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pp-death-save-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+  gap: 7px;
+}
+
+.pp-detail-strip .pp-death-result {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: auto;
+  min-height: 36px;
+  padding: 5px 8px;
+}
+
+.pp-death-result span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-death-result strong {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.pp-detail-strip .pp-death-reset {
+  width: 34px;
+  height: 100%;
+  min-height: 36px;
 }
 
 @media (max-width: 430px) {
-  .pp-stats-page .pp-death-strip {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+  .pp-death-save-actions {
+    grid-template-columns: 1fr 1fr;
   }
 
-  .pp-stats-page .pp-death-strip > strong {
-    font-size: 0.72rem;
+  .pp-detail-strip .pp-death-result {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .pp-stats-page .pp-death-strip .pp-action-btn {
+  .pp-death-result strong {
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+
+  .pp-detail-strip .pp-death-reset {
     grid-column: 1 / -1;
     width: 100%;
+    min-height: 32px;
   }
 }
 
