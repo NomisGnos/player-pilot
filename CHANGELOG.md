@@ -1,7 +1,14 @@
 # Changelog
 
+## v0.2.1
+
+- Restored a human-visible selected-player loading screen on fast and cached browser loads, including the world title, system branding, Foundry loading status, and blank-screen warning.
+- Added a versioned module entry point so browsers request the updated Player Pilot script instead of reusing the previous cached JavaScript.
+
 ## v0.2.0
 
+- Made selected-player loading deterministic from saved activation data, enabled Foundry no-canvas mode before first canvas initialization, and removed the first-load canvas-then-reload penalty.
+- Reduced startup mutation-observer overhead by watching only direct body/document changes instead of every Player Pilot subtree repaint.
 - Limited the Player Pilot loading screen to activated non-GM Player Pilot users; GMs and unselected players no longer receive the startup overlay.
 - Surfaced important Foundry, D&D5e, and automation confirmation dialogs above the Player Pilot shell with Player Pilot styling while preserving their original buttons and callbacks.
 - Fixed D&D5e 5.3.3 skill, ability-check, saving-throw, and death-save calls to use the current roll API and skip the obscured native configuration dialog.

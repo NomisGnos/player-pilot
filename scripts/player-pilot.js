@@ -2,14 +2,72 @@ const MODULE_ID = "player-pilot";
 const SOCKET = `module.${MODULE_ID}`;
 const OWNER = 3;
 const DND_ICON_ROOT = `modules/${MODULE_ID}/assets/dnd5e/svg`;
+const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
+const BOOT_MIN_VISIBLE_MS = 1800;
 
 const bootState = {
   enabled: false,
   screen: null,
   progress: 6,
+  label: 'Starting Foundry...',
+  mountedAt: 0,
   timer: null,
+  mountTimer: null,
+  revealTimer: null,
   observer: null
 };
+
+function parseStoredSettingValue(source, fallback) {
+  let value = source?._source?.value ?? source?.value ?? source;
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch (_err) {
+      // Plain strings such as activation modes are valid stored values.
+    }
+  }
+  return value;
+}
+
+function storedWorldSetting(key, fallback) {
+  try {
+    const storage = globalThis.game?.settings?.storage?.get?.('world');
+    const id = `${MODULE_ID}.${key}`;
+    const document = storage?.getSetting?.(id, null) ?? storage?.get?.(id);
+    return parseStoredSettingValue(document, fallback);
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function earlyUserIsPilot(user = globalThis.game?.user) {
+  if (!user || user.isGM) return false;
+  const mode = String(storedWorldSetting('activationMode', 'selected'));
+  if (mode === 'off') return false;
+  if (mode === 'all') return true;
+  const enabled = storedWorldSetting('enabledUsers', {});
+  return enabled?.[user.id] === true;
+}
+
+function syncManagedNoCanvas(enabled) {
+  try {
+    const storage = globalThis.game?.settings?.storage?.get?.('client') ?? globalThis.window?.localStorage;
+    if (!storage) return;
+    const managed = storage.getItem(MANAGED_NO_CANVAS_KEY) === 'true';
+    if (enabled) {
+      if (!managed && storage.getItem('core.noCanvas') !== 'true') {
+        storage.setItem('core.noCanvas', 'true');
+        storage.setItem(MANAGED_NO_CANVAS_KEY, 'true');
+      }
+    } else if (managed) {
+      storage.setItem('core.noCanvas', 'false');
+      storage.removeItem(MANAGED_NO_CANVAS_KEY);
+    }
+  } catch (_err) {
+    // The ready hook retains a registered-setting fallback.
+  }
+}
 
 function bootSystemLogo(systemId = "") {
   const id = String(systemId).toLowerCase();
@@ -51,9 +109,10 @@ function ensureBootScreen() {
   screen.className = "pp-boot-screen";
   screen.setAttribute("role", "status");
   screen.setAttribute("aria-live", "polite");
+  screen.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;width:100vw;height:100vh;z-index:2147483000;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:24px;color:#e7eef2;background:#071017;font-family:Signika,Arial,sans-serif;';
   screen.innerHTML = `
-    <div class="pp-boot-card">
-      <img class="pp-boot-system-logo" data-pp-system-logo hidden alt="">
+    <div class="pp-boot-card" style="display:grid;justify-items:center;gap:10px;width:min(390px,100%);box-sizing:border-box;padding:28px 24px;text-align:center;background:#111d26;border:1px solid rgba(126,225,205,.34);border-radius:10px;box-shadow:0 22px 70px rgba(0,0,0,.48)">
+      <img class="pp-boot-system-logo" data-pp-system-logo hidden alt="" style="display:block;width:min(250px,76vw);max-height:92px;object-fit:contain">
       <div class="pp-boot-mark"><i class="fas fa-paper-plane"></i></div>
       <h1>Player Pilot</h1>
       <div class="pp-boot-world">
@@ -70,8 +129,10 @@ function ensureBootScreen() {
   `;
   document.body.appendChild(screen);
   bootState.screen = screen;
+  bootState.mountedAt = Date.now();
   updateBootBranding(screen);
-  updateBootProgress(bootState.progress, "Starting Foundry...");
+  updateBootProgress(bootState.progress, bootState.label);
+  if (bootState.timer) window.clearInterval(bootState.timer);
   bootState.timer = window.setInterval(() => {
     if (!bootState.screen?.isConnected || bootState.progress >= 88) return;
     updateBootProgress(Math.min(88, bootState.progress + 1));
@@ -81,25 +142,39 @@ function ensureBootScreen() {
 
 function keepBootScreenAttached() {
   if (!bootState.enabled || bootState.observer || !document.documentElement) return;
+  const observeTargets = () => {
+    bootState.observer?.observe?.(document.documentElement, { childList: true });
+    if (document.body) bootState.observer?.observe?.(document.body, { childList: true });
+  };
   bootState.observer = new MutationObserver(() => {
     if (!bootState.enabled || !document.documentElement.classList.contains("player-pilot-booting")) return;
     if (bootState.screen?.isConnected) return;
-    window.queueMicrotask(ensureBootScreen);
+    Promise.resolve().then(() => {
+      ensureBootScreen();
+      observeTargets();
+    });
   });
-  bootState.observer.observe(document.documentElement, { childList: true, subtree: true });
+  observeTargets();
 }
 
 function startBootScreen() {
-  if (bootState.enabled) return ensureBootScreen();
   bootState.enabled = true;
   document.documentElement?.classList?.add?.("player-pilot-booting");
   const screen = ensureBootScreen();
   keepBootScreenAttached();
+  if (!bootState.mountTimer) {
+    bootState.mountTimer = window.setInterval(() => {
+      if (!bootState.enabled) return;
+      document.documentElement?.classList?.add?.('player-pilot-booting');
+      ensureBootScreen();
+    }, 150);
+  }
   return screen;
 }
 
 function updateBootProgress(progress, label = "") {
   bootState.progress = clamp(Number(progress) || 0, 0, 100);
+  if (label) bootState.label = label;
   const screen = ensureBootScreen();
   if (!screen) return;
   const fill = screen.querySelector("[data-pp-boot-fill]");
@@ -113,12 +188,24 @@ function updateBootProgress(progress, label = "") {
 function removeBootScreen() {
   bootState.enabled = false;
   if (bootState.timer) window.clearInterval(bootState.timer);
+  if (bootState.mountTimer) window.clearInterval(bootState.mountTimer);
+  if (bootState.revealTimer) window.clearTimeout(bootState.revealTimer);
   bootState.timer = null;
+  bootState.mountTimer = null;
+  bootState.revealTimer = null;
   bootState.observer?.disconnect?.();
   bootState.observer = null;
   bootState.screen?.remove();
   bootState.screen = null;
+  bootState.mountedAt = 0;
   document.documentElement?.classList?.remove?.("player-pilot-booting");
+}
+
+if (earlyUserIsPilot()) {
+  syncManagedNoCanvas(storedWorldSetting('useNoCanvas', true) === true);
+  startBootScreen();
+} else {
+  syncManagedNoCanvas(false);
 }
 
 const TABS = [
@@ -2527,19 +2614,52 @@ function mountPilotShell() {
   queueRender();
 }
 
+function pilotShellIsPainted() {
+  const shell = state.shell;
+  const topbar = shell?.querySelector?.('.pp-topbar');
+  if (!(shell instanceof HTMLElement) || !(topbar instanceof HTMLElement) || !shell.isConnected) return false;
+  const style = window.getComputedStyle?.(shell);
+  if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) return false;
+  const shellRect = shell.getBoundingClientRect();
+  const topbarRect = topbar.getBoundingClientRect();
+  return shellRect.width > 0 && shellRect.height > 0 && topbarRect.width > 0 && topbarRect.height > 0;
+}
+
 function revealPilotShell() {
   updateBootProgress(96, "Building your controls...");
   renderShell();
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => {
-      if (!state.shell?.isConnected || !state.shell.querySelector(".pp-topbar")) {
+  let attempts = 0;
+  const confirmPaint = () => {
+    if (!userIsPilot()) {
+      removeBootScreen();
+      return;
+    }
+    if (!state.shell?.isConnected || !state.shell.querySelector('.pp-topbar')) {
+      try {
         mountPilotShell();
         renderShell();
+      } catch (err) {
+        console.error('Player Pilot | Failed to mount the player shell while loading', err);
+      }
+    }
+    if (pilotShellIsPainted()) {
+      const visibleFor = Date.now() - Number(bootState.mountedAt || Date.now());
+      if (visibleFor < BOOT_MIN_VISIBLE_MS) {
+        bootState.revealTimer = window.setTimeout(confirmPaint, Math.max(125, BOOT_MIN_VISIBLE_MS - visibleFor));
+        return;
       }
       updateBootProgress(100, "Ready");
-      window.setTimeout(removeBootScreen, 220);
-    });
-  });
+      bootState.revealTimer = window.setTimeout(() => {
+        if (pilotShellIsPainted()) removeBootScreen();
+        else confirmPaint();
+      }, 350);
+      return;
+    }
+    attempts += 1;
+    if (attempts === 12) updateBootProgress(97, 'Still preparing your controls...');
+    bootState.revealTimer = window.setTimeout(confirmPaint, 125);
+  };
+  window.requestAnimationFrame(() => window.requestAnimationFrame(confirmPaint));
 }
 
 function unmountPilotShell() {
@@ -7374,7 +7494,7 @@ function installPilotPromptObserver() {
     }
     window.queueMicrotask(syncPilotPromptBackdrop);
   });
-  state.nativePromptObserver.observe(document.body, { childList: true, subtree: true });
+  state.nativePromptObserver.observe(document.body, { childList: true });
 }
 
 function registerHooks() {
@@ -7386,12 +7506,14 @@ function registerHooks() {
   Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.once("init", () => {
     registerSettings();
-    if (userIsPilot()) {
+    const activePilot = userIsPilot();
+    syncManagedNoCanvas(activePilot && setting('useNoCanvas', true) === true);
+    if (activePilot) {
       startBootScreen();
       updateBootBranding();
       updateBootProgress(34, "Loading Player Pilot settings...");
     } else removeBootScreen();
-    installAudioSuppression();
+    if (activePilot) installAudioSuppression();
     installChatModeBridge();
     Hooks.on("canvasInit", () => {
       if (userIsPilot() && setting("useNoCanvas", true) === true) document.body?.classList?.add?.("player-pilot-active");
@@ -7401,15 +7523,16 @@ function registerHooks() {
     if (!userIsPilot()) return;
     updateBootBranding();
     updateBootProgress(72, "Preparing your character controls...");
-    installPilotPromptObserver();
     mountPilotShell();
   });
   Hooks.once("ready", async () => {
     updateBootBranding();
     if (userIsPilot()) updateBootProgress(90, "Finishing character data...");
     game.socket?.on?.(SOCKET, handleSocket);
-    registerChatCapture();
-    installAudioSuppression();
+    if (userIsPilot()) {
+      registerChatCapture();
+      installAudioSuppression();
+    }
     installChatModeBridge();
     if (game.user?.isGM) installGmMapToggleButton();
     await enforceNoCanvasIfNeeded();
