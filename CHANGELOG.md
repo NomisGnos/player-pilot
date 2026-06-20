@@ -2,8 +2,7 @@
 
 ## v0.2.1
 
-- Restored a human-visible selected-player loading screen on fast and cached browser loads, including the world title, system branding, Foundry loading status, and blank-screen warning.
-- Added a versioned module entry point so browsers request the updated Player Pilot script instead of reusing the previous cached JavaScript.
+- Restored a human-visible selected-player loading screen on fast and cached browser loads, including the world title, system branding, Foundry loading status, and blank-screen warning; the completed loader now remains through a confirmed painted frame before handing off to Player Pilot.
 
 ## v0.2.0
 

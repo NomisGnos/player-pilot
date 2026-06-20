@@ -4,6 +4,7 @@ const OWNER = 3;
 const DND_ICON_ROOT = `modules/${MODULE_ID}/assets/dnd5e/svg`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
 const BOOT_MIN_VISIBLE_MS = 1800;
+const BOOT_READY_HOLD_MS = 1200;
 
 const bootState = {
   enabled: false,
@@ -2652,7 +2653,7 @@ function revealPilotShell() {
       bootState.revealTimer = window.setTimeout(() => {
         if (pilotShellIsPainted()) removeBootScreen();
         else confirmPaint();
-      }, 350);
+      }, BOOT_READY_HOLD_MS);
       return;
     }
     attempts += 1;

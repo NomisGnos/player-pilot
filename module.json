@@ -23,7 +23,7 @@
     }
   ],
   "esmodules": [
-    "scripts/player-pilot-0.2.1.js"
+    "scripts/player-pilot.js"
   ],
   "styles": [
     {
