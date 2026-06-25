@@ -11,9 +11,26 @@ It is meant for players using a phone or tablet at the table. Players still log 
 
 Sheet Sidekick can stay installed for older worlds or reference. Player Pilot is a new module with a new UI and cleaner internals.
 
+## Installation
+
+Install this module from Foundry's **Add-on Modules** screen using the manifest URL:
+
+```text
+https://github.com/NomisGnos/player-pilot/releases/latest/download/module.json
+```
+
+Or install it manually:
+
+1. Download the release zip.
+2. Extract the module folder into your Foundry `Data/modules` folder.
+3. Make sure the folder name matches the module id.
+4. Restart Foundry if it was already running.
+5. Enable the module inside your world from **Manage Modules**.
+
+
 ## Setup
 
-1. Copy the `player-pilot` folder into your Foundry `Data/modules` folder.
+1. Follow instructions under Installation
 2. Restart Foundry or use Foundry's module refresh if your hosting setup supports it.
 3. Enable `Player Pilot` in your world.
 4. Open `Game Settings -> Configure Settings -> Module Settings`.
@@ -125,3 +142,7 @@ https://www.patreon.com/cw/nomisDM
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
+
+## Credits
+
+Some icons are from [game-icons.net](https://game-icons.net/) and are used under the Creative Commons Attribution 3.0 license. Icons are credited to their respective authors where applicable.
