@@ -285,16 +285,49 @@ body.player-pilot-active #pause {
 }
 
 .pp-boot-fill {
-  width: 6%;
+  position: relative;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
   background: linear-gradient(90deg, #3ca58f, #8be0cf);
   border-radius: inherit;
-  transition: width 240ms ease;
+  transform: scaleX(0.06);
+  transform-origin: left center;
+  will-change: transform;
+}
+
+.pp-boot-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.48), transparent);
+  transform: translateX(-150%);
+  animation: pp-boot-progress-sheen 1.45s ease-in-out infinite;
+}
+
+@keyframes pp-boot-progress-sheen {
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-boot-fill::after {
+    animation: none;
+  }
 }
 
 .pp-boot-card > strong {
   color: #9ef1df;
   font-size: 1.05rem;
+}
+
+.pp-boot-percent {
+  display: block;
+  min-width: 3.3ch;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .player-pilot-shell {
@@ -433,6 +466,12 @@ body.player-pilot-active #pause {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.pp-stat-icon .pp-die-glyph {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .pp-stat-copy {
   min-width: 0;
 }
@@ -546,6 +585,12 @@ body.player-pilot-active #pause {
 
 .pp-tab i {
   font-size: 1.08rem;
+}
+
+.pp-tab .pp-die-glyph {
+  width: 1.08rem;
+  height: 1.08rem;
+  object-fit: contain;
 }
 
 .pp-tab[aria-selected="true"] {
@@ -667,6 +712,12 @@ body.player-pilot-active #pause {
 .pp-big-header i {
   color: var(--pp-accent);
   font-size: 1.1rem;
+}
+
+.pp-big-header .pp-die-glyph {
+  width: 1.1rem;
+  height: 1.1rem;
+  object-fit: contain;
 }
 
 .pp-header-count,
@@ -1123,6 +1174,33 @@ body.player-pilot-active #pause {
   min-width: 72px;
 }
 
+.pp-target-states {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pp-target-state-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  object-fit: cover;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+}
+
+.pp-target-state-text {
+  color: #f4ecff;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
 .pp-empty {
   color: var(--pp-muted);
   padding: 14px;
@@ -1268,6 +1346,14 @@ body.player-pilot-active #pause {
   position: fixed;
   right: 14px;
   top: 14px;
+}
+
+body.player-pilot-active.player-pilot-shared-popups .pp-shared-document-popup,
+body.player-pilot-active.player-pilot-shared-popups .application.image-popout,
+body.player-pilot-active.player-pilot-shared-popups .application.journal-sheet,
+body.player-pilot-active.player-pilot-shared-popups .application[data-application-class="ImagePopout"],
+body.player-pilot-active.player-pilot-shared-popups .application[data-application-class*="Journal"] {
+  z-index: 2147482900 !important;
 }
 
 .pp-access-panel {
@@ -1834,6 +1920,12 @@ body.player-pilot-active #pause {
 .pp-roll-choice-hero i {
   color: var(--pp-accent);
   font-size: 2rem;
+}
+
+.pp-roll-choice-hero > .pp-die-glyph {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
 }
 
 .pp-roll-choice-hero strong {
@@ -2779,7 +2871,8 @@ button.pp-card-img.pp-card-info-btn {
   cursor: pointer;
 }
 
-.pp-roll-die-btn img {
+.pp-roll-die-btn .pp-die-glyph {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -2853,7 +2946,8 @@ button.pp-card-img.pp-card-info-btn {
   gap: 2px;
 }
 
-.pp-formula-dice img {
+.pp-formula-dice .pp-die-glyph {
+  display: inline-block;
   width: 28px;
   height: 28px;
   object-fit: contain;
@@ -3517,9 +3611,11 @@ button.pp-card-img.pp-card-info-btn {
   background: #101820;
 }
 
-.pp-initiative-roll img {
+.pp-initiative-roll .pp-die-glyph {
+  display: block;
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .pp-state-toggle {
@@ -3635,8 +3731,8 @@ button.pp-card-img.pp-card-info-btn {
   align-items: center;
 }
 
-.pp-formula-dice img {
-  display: block;
+.pp-formula-dice .pp-die-glyph {
+  display: inline-block;
 }
 
 .pp-roll-mode {
@@ -4494,5 +4590,540 @@ body.player-pilot-active #notifications > .notification.error {
 @media (max-width: 430px) {
   .pp-roll-instruction-actions.pp-native-choice-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Compact concentration gate and GM-only action notices. */
+.pp-concentration-gate {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  color: #fff4d8;
+  background: rgba(123, 78, 24, 0.28);
+  border: 1px solid rgba(214, 163, 79, 0.62);
+  border-radius: 6px;
+}
+
+.pp-concentration-gate > i {
+  color: #f0bd66;
+  font-size: 1.3rem;
+  text-align: center;
+}
+
+.pp-concentration-gate > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pp-concentration-gate span {
+  color: #d8c6a2;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pp-concentration-gate strong {
+  overflow: hidden;
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message .pp-gm-action-notice {
+  display: grid;
+  gap: 5px;
+  margin: -2px 0;
+  padding: 7px 8px;
+  color: #edf7f4;
+  background: linear-gradient(135deg, #17272b, #11191f);
+  border: 1px solid rgba(98, 199, 178, 0.5);
+  border-left: 3px solid #62c7b2;
+  border-radius: 5px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+}
+
+.chat-message:has(.pp-gm-action-notice) {
+  padding: 4px;
+}
+
+.chat-message:has(.pp-gm-action-notice) .message-header {
+  display: none;
+}
+
+.chat-message:has(.pp-gm-action-notice) .message-content {
+  margin: 0;
+}
+
+.pp-gm-action-heading,
+.pp-gm-action-summary,
+.pp-gm-action-details {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pp-gm-action-heading {
+  justify-content: space-between;
+  gap: 8px;
+  color: #a9c4c0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.pp-gm-action-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-gm-action-heading em {
+  flex: 0 0 auto;
+  color: #82d7c6;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.pp-gm-action-summary {
+  gap: 6px;
+}
+
+.pp-gm-action-summary > i {
+  flex: 0 0 18px;
+  color: #f0bd66;
+  text-align: center;
+}
+
+.pp-gm-action-summary > strong {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 0.9rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-gm-action-summary > small {
+  min-width: 0;
+  overflow: hidden;
+  color: #b7c5c8;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-gm-action-details {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pp-gm-action-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 21px;
+  padding: 2px 6px;
+  color: #e9f2f1;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  line-height: 1.1;
+}
+
+.pp-gm-action-pill b {
+  color: #9eb3b5;
+  font-size: 0.57rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pp-gm-action-pill strong {
+  overflow: hidden;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-gm-action-level {
+  color: #fff2c9;
+  background: rgba(214, 163, 79, 0.18);
+  border-color: rgba(214, 163, 79, 0.48);
+}
+
+.pp-gm-action-level strong {
+  font-size: 0.82rem;
+}
+
+.pp-gm-action-target {
+  flex: 1 1 130px;
+}
+
+/* Cast-level previews are informational; actionable rolls appear on the next step. */
+.pp-upcast-preview-heading,
+.pp-rolls-required-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border-radius: 5px;
+}
+
+.pp-upcast-preview-heading {
+  color: #fff0c9;
+  background: rgba(214, 163, 79, 0.13);
+  border: 1px solid rgba(214, 163, 79, 0.42);
+}
+
+.pp-rolls-required-heading {
+  color: #dff8f2;
+  background: rgba(48, 124, 102, 0.22);
+  border: 1px solid rgba(98, 199, 178, 0.48);
+}
+
+.pp-upcast-preview-heading > i,
+.pp-rolls-required-heading > i {
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+.pp-upcast-preview-heading > div,
+.pp-rolls-required-heading > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pp-upcast-preview-heading strong,
+.pp-rolls-required-heading strong {
+  font-size: 0.86rem;
+}
+
+.pp-upcast-preview-heading span,
+.pp-rolls-required-heading span {
+  color: #bdc9cc;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.pp-cast-preview {
+  align-items: stretch;
+}
+
+.pp-cast-preview-title {
+  color: #d8c6a2;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pp-cast-preview > .pp-upcast-effect {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  background: #10171d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.pp-upcast-effect > span {
+  color: #aebbc0;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.pp-upcast-effect > strong {
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.pp-upcast-effect > strong em {
+  color: #d8c6a2;
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.pp-upcast-effect > small {
+  color: #9eabb4;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.pp-upcast-effect > small.increased {
+  color: #9ef1df;
+}
+
+@media (max-width: 430px) {
+  .pp-cast-preview > .pp-upcast-effect {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pp-upcast-effect > span {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Final roll-step alignment, hierarchy, and formula readability. */
+.pp-roll-instruction.pp-roll-choice-hero {
+  grid-template-columns: 54px minmax(0, 1fr) minmax(92px, auto) !important;
+  align-items: center !important;
+  gap: 11px !important;
+}
+
+.pp-roll-instruction-copy {
+  align-self: center;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 75%;
+  min-height: 48px;
+}
+
+.pp-roll-instruction-actions,
+.pp-roll-instruction-actions.pp-native-choice-actions {
+  grid-column: 3 !important;
+  align-self: center;
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) !important;
+  gap: 6px;
+  width: min(132px, 100%);
+  margin: 0;
+}
+
+.pp-roll-instruction-actions .pp-button {
+  width: 100%;
+  min-width: 0;
+}
+
+.pp-roll-kind-attack {
+  background: linear-gradient(135deg, rgba(31, 73, 105, 0.9), rgba(13, 27, 38, 0.98)) !important;
+  border-color: rgba(108, 187, 242, 0.62) !important;
+  box-shadow: inset 3px 0 0 #6cbbf2;
+}
+
+.pp-roll-kind-damage {
+  margin-top: 6px;
+  background: linear-gradient(135deg, rgba(91, 43, 35, 0.88), rgba(32, 20, 19, 0.98)) !important;
+  border-color: rgba(232, 135, 94, 0.62) !important;
+  box-shadow: inset 3px 0 0 #e8875e;
+}
+
+.pp-roll-kind-damage + .pp-roll-kind-damage {
+  margin-top: 0;
+}
+
+.pp-roll-kind-healing {
+  background: linear-gradient(135deg, rgba(31, 83, 58, 0.86), rgba(15, 33, 25, 0.98)) !important;
+  border-color: rgba(124, 195, 110, 0.58) !important;
+  box-shadow: inset 3px 0 0 #7cc36e;
+}
+
+.pp-roll-kind-save {
+  background: linear-gradient(135deg, rgba(66, 52, 99, 0.86), rgba(26, 22, 40, 0.98)) !important;
+  border-color: rgba(164, 140, 224, 0.58) !important;
+  box-shadow: inset 3px 0 0 #a48ce0;
+}
+
+.pp-formula-dice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+
+.pp-formula-modifier {
+  display: inline-flex !important;
+  align-items: center;
+  align-self: center;
+  min-height: 28px;
+  padding: 2px 7px;
+  color: #ffffff !important;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  font-size: 0.84rem !important;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .pp-roll-instruction.pp-roll-choice-hero {
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+  }
+
+  .pp-roll-instruction-actions {
+    grid-column: 1 / -1 !important;
+    grid-template-columns: 1fr !important;
+    width: 100%;
+  }
+
+  .pp-roll-instruction-actions.pp-native-choice-actions {
+    grid-column: 1 / -1 !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100%;
+  }
+}
+
+/* Readability pass: slightly larger base type and clear upcast information. */
+.player-pilot-shell,
+.pp-modal {
+  font-size: 18px !important;
+}
+
+.pp-upcast-preview-heading,
+.pp-rolls-required-heading {
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  padding: 11px;
+}
+
+.pp-upcast-preview-heading > i,
+.pp-rolls-required-heading > i {
+  font-size: 1.2rem;
+}
+
+.pp-upcast-preview-heading strong,
+.pp-rolls-required-heading strong {
+  font-size: 1rem;
+}
+
+.pp-upcast-preview-heading span,
+.pp-rolls-required-heading span {
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.pp-cast-preview-title {
+  font-size: 0.78rem;
+}
+
+.pp-cast-preview > .pp-upcast-effect {
+  gap: 9px;
+  padding: 9px 10px;
+}
+
+.pp-upcast-effect > span {
+  font-size: 0.82rem;
+}
+
+.pp-upcast-effect > strong {
+  font-size: 1.08rem;
+}
+
+.pp-upcast-effect > strong em {
+  font-size: 0.82rem;
+}
+
+.pp-upcast-effect > small {
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+/* Sneak Attack is assessed conservatively against the current weapon and target state. */
+.pp-sneak-attack-choice {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.pp-sneak-attack-copy {
+  display: grid !important;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pp-sneak-attack-status {
+  display: inline-flex !important;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  font-weight: 1000;
+  letter-spacing: 0.035em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.pp-sneak-attack-copy strong {
+  color: #f7edff;
+  font-size: 0.92rem;
+}
+
+.pp-sneak-attack-copy small {
+  color: #cbbbd7;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.pp-sneak-attack-choice > b {
+  color: #ffffff;
+  font-size: 0.96rem;
+  white-space: nowrap;
+}
+
+.pp-sneak-attack-choice.applicable {
+  color: #e6ffe1;
+  background: rgba(42, 91, 48, 0.55);
+  border-color: rgba(124, 195, 110, 0.68);
+}
+
+.pp-sneak-attack-choice.uncertain {
+  color: #fff1cf;
+  background: rgba(102, 74, 31, 0.55);
+  border-color: rgba(214, 163, 79, 0.68);
+}
+
+.pp-sneak-attack-choice.not-detected {
+  color: #ffe0d1;
+  background: linear-gradient(135deg, rgba(119, 48, 32, 0.8), rgba(52, 27, 24, 0.94));
+  border-color: rgba(255, 137, 93, 0.88);
+  box-shadow: inset 4px 0 0 #ff895d;
+}
+
+.pp-sneak-attack-choice.not-detected .pp-sneak-attack-status {
+  color: #fff2ea;
+  background: rgba(134, 41, 25, 0.72);
+}
+
+.pp-sneak-attack-choice.not-detected .pp-sneak-attack-copy strong {
+  color: #ffffff;
+}
+
+.pp-sneak-attack-choice.not-detected input:not(:checked) {
+  outline: 2px solid rgba(255, 137, 93, 0.62);
+  outline-offset: 2px;
+}
+
+.pp-sneak-attack-choice.ineligible {
+  color: #d1d4d6;
+  background: rgba(54, 58, 63, 0.72);
+  border-color: rgba(174, 182, 191, 0.35);
+  cursor: not-allowed;
+}
+
+.pp-sneak-attack-choice.ineligible input,
+.pp-sneak-attack-choice.ineligible .pp-sneak-attack-copy,
+.pp-sneak-attack-choice.ineligible > b {
+  opacity: 0.68;
+}
+
+@media (max-width: 430px) {
+  .pp-sneak-attack-choice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .pp-sneak-attack-choice > b {
+    grid-column: 2;
+    justify-self: start;
   }
 }

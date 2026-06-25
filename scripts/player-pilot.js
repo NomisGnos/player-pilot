@@ -1,20 +1,35 @@
 const MODULE_ID = "player-pilot";
 const SOCKET = `module.${MODULE_ID}`;
 const OWNER = 3;
-const DND_ICON_ROOT = `modules/${MODULE_ID}/assets/dnd5e/svg`;
+const CORE_ICON_ROOT = "icons/svg";
+const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
 const BOOT_MIN_VISIBLE_MS = 1800;
 const BOOT_READY_HOLD_MS = 1200;
+const BOOT_PROGRESS_INTERVAL_MS = 250;
+const BOOT_INITIAL_DRIFT_MS = 18000;
+const BOOT_MIN_DRIFT_MS = 30000;
+const BOOT_MAX_DRIFT_MS = 60000;
+const STARTUP_NOTICE_LIFETIME_MS = 10000;
 
 const bootState = {
   enabled: false,
   screen: null,
   progress: 6,
+  displayedProgress: 6,
+  fakeCeiling: 31,
   label: 'Starting Foundry...',
   mountedAt: 0,
+  lastStageAt: 0,
+  driftStart: 6,
+  driftTarget: 31,
+  driftStartedAt: 0,
+  driftDurationMs: BOOT_INITIAL_DRIFT_MS,
+  driftVersion: 0,
   timer: null,
   mountTimer: null,
   revealTimer: null,
+  finishing: false,
   observer: null
 };
 
@@ -42,13 +57,54 @@ function storedWorldSetting(key, fallback) {
   }
 }
 
-function earlyUserIsPilot(user = globalThis.game?.user) {
-  if (!user || user.isGM) return false;
-  const mode = String(storedWorldSetting('activationMode', 'selected'));
+function currentSystemId() {
+  return String(globalThis.game?.system?.id ?? "").toLowerCase();
+}
+
+function renderDieGlyph(sides, extraClass = "") {
+  const die = String(sides ?? "").replace(/\D/g, "");
+  const classes = ["pp-die-glyph", String(extraClass ?? "").trim()].filter(Boolean).join(" ");
+  return `<img class="${escapeHtml(classes)}" src="${escapeHtml(`${GAME_ICON_DICE_ROOT}/d${die}.svg`)}" alt="" aria-hidden="true">`;
+}
+
+function renderInterfaceIcon(icon, extraClass = "") {
+  if (icon === "pp-die-d20") return renderDieGlyph(20, extraClass);
+  const classes = ["fas", String(icon ?? ""), String(extraClass ?? "")].filter(Boolean).join(" ");
+  return `<i class="${escapeHtml(classes)}" aria-hidden="true"></i>`;
+}
+
+function earlyCurrentUser() {
+  const foundryGame = globalThis.game;
+  if (foundryGame?.user) return foundryGame.user;
+  const userId = String(foundryGame?.userId ?? foundryGame?.data?.userId ?? "");
+  if (!userId) return null;
+  const users = foundryGame?.data?.users;
+  if (Array.isArray(users)) {
+    return users.find((user) => String(user?._id ?? user?.id ?? "") === userId) ?? null;
+  }
+  return users?.get?.(userId) ?? null;
+}
+
+function earlyUserIsGm(user) {
+  if (!user) return null;
+  if (typeof user.isGM === "boolean") return user.isGM;
+  const role = Number(user.role ?? user?._source?.role);
+  if (!Number.isFinite(role)) return null;
+  const assistantRole = Number(globalThis.CONST?.USER_ROLES?.ASSISTANT ?? 3);
+  return role >= assistantRole;
+}
+
+function earlyUserIsPilot(user = earlyCurrentUser()) {
+  if (!user || earlyUserIsGm(user) !== false) return false;
+  const storedMode = storedWorldSetting('activationMode', null);
+  if (storedMode === null || storedMode === undefined) return true;
+  const mode = String(storedMode);
   if (mode === 'off') return false;
   if (mode === 'all') return true;
-  const enabled = storedWorldSetting('enabledUsers', {});
-  return enabled?.[user.id] === true;
+  const enabled = storedWorldSetting('enabledUsers', null);
+  if (!enabled || typeof enabled !== 'object') return true;
+  const userId = String(user.id ?? user._id ?? globalThis.game?.userId ?? "");
+  return enabled?.[userId] === true;
 }
 
 function syncManagedNoCanvas(enabled) {
@@ -70,11 +126,8 @@ function syncManagedNoCanvas(enabled) {
   }
 }
 
-function bootSystemLogo(systemId = "") {
-  const id = String(systemId).toLowerCase();
-  if (id === "pf2e") return "systems/pf2e/assets/pathfinder_logo.webp";
-  if (id === "dnd5e") return "systems/dnd5e/ui/official/ampersand-gold.svg";
-  return "";
+function bootSystemLogo() {
+  return `${GAME_ICON_DICE_ROOT}/d20.svg`;
 }
 
 function updateBootBranding(screen = bootState.screen) {
@@ -92,17 +145,80 @@ function updateBootBranding(screen = bootState.screen) {
     logo.hidden = !logoSrc;
     if (logoSrc) {
       logo.src = logoSrc;
-      logo.alt = systemTitle ? `${systemTitle} logo` : "Game system logo";
+      logo.alt = "Player Pilot d20";
     }
   }
   if (systemName) systemName.textContent = systemTitle || "Foundry VTT";
   if (worldName) worldName.textContent = worldTitle || "Loading world...";
 }
 
+function bootClock() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function estimatedBootProgress(now = bootClock()) {
+  const start = Number(bootState.driftStart ?? bootState.progress);
+  const target = Math.max(start, Number(bootState.driftTarget ?? start));
+  const duration = Math.max(1, Number(bootState.driftDurationMs ?? 1));
+  const elapsed = Math.max(0, now - Number(bootState.driftStartedAt || now));
+  const ratio = clamp(elapsed / duration, 0, 1);
+  return Math.max(bootState.progress, start + ((target - start) * ratio));
+}
+
+function paintBootProgress(screen, current, label = "", target = current, durationMs = 0, version = bootState.driftVersion) {
+  if (!(screen instanceof HTMLElement)) return;
+  const safeCurrent = clamp(Number(current) || 0, 0, 100);
+  const safeTarget = clamp(Math.max(safeCurrent, Number(target) || safeCurrent), 0, 100);
+  const fill = screen.querySelector("[data-pp-boot-fill]");
+  const track = screen.querySelector(".pp-boot-track");
+  const percent = screen.querySelector("[data-pp-boot-percent]");
+  const text = screen.querySelector("[data-pp-boot-label]");
+  const setAnimatedTransform = (element, currentTransform, targetTransform) => {
+    if (!(element instanceof HTMLElement)) return;
+    element.style.transition = "none";
+    element.style.transform = currentTransform;
+    if (safeTarget > safeCurrent && durationMs > 0) {
+      element.getBoundingClientRect();
+      if (element.isConnected && version === bootState.driftVersion) {
+        element.style.transition = `transform ${Math.round(durationMs)}ms linear`;
+        element.style.transform = targetTransform;
+      }
+    }
+  };
+  if (fill instanceof HTMLElement) {
+    setAnimatedTransform(fill, `scaleX(${safeCurrent / 100})`, `scaleX(${safeTarget / 100})`);
+  }
+  if (percent instanceof HTMLElement) {
+    if (safeCurrent >= 100) bootState.displayedProgress = 100;
+    const shown = clamp(Math.round(bootState.displayedProgress), 0, 100);
+    percent.textContent = `${shown}%`;
+    percent.setAttribute("aria-label", `${shown} percent`);
+  }
+  if (track) track.setAttribute("aria-valuenow", String(Math.round(safeCurrent)));
+  if (text && label) text.textContent = label;
+}
+
+function refreshBootEstimate() {
+  const screen = bootState.screen;
+  if (!(screen instanceof HTMLElement) || !screen.isConnected) return;
+  const estimate = estimatedBootProgress();
+  const track = screen.querySelector(".pp-boot-track");
+  const percent = screen.querySelector("[data-pp-boot-percent]");
+  const desired = Math.min(99, Math.floor(estimate));
+  if (bootState.displayedProgress < desired) bootState.displayedProgress += 1;
+  if (track) track.setAttribute("aria-valuenow", String(Math.round(estimate)));
+  if (percent) {
+    const shown = clamp(Math.round(bootState.displayedProgress), 0, 100);
+    percent.textContent = `${shown}%`;
+    percent.setAttribute("aria-label", `${shown} percent`);
+  }
+}
+
 function ensureBootScreen() {
   if (!bootState.enabled) return null;
   if (bootState.screen?.isConnected) return bootState.screen;
-  if (!document.body) {
+  const mountRoot = document.documentElement ?? document.body;
+  if (!mountRoot) {
     document.addEventListener("DOMContentLoaded", ensureBootScreen, { once: true });
     return null;
   }
@@ -125,19 +241,26 @@ function ensureBootScreen() {
       <div class="pp-boot-track" aria-label="Loading progress">
         <div class="pp-boot-fill" data-pp-boot-fill></div>
       </div>
-      <strong data-pp-boot-percent>6%</strong>
+      <strong class="pp-boot-percent" data-pp-boot-percent aria-label="6 percent">6%</strong>
     </div>
   `;
-  document.body.appendChild(screen);
+  mountRoot.appendChild(screen);
   bootState.screen = screen;
   bootState.mountedAt = Date.now();
+  const now = bootClock();
+  if (!bootState.driftStartedAt) {
+    bootState.driftStartedAt = now;
+    bootState.lastStageAt = now;
+  }
   updateBootBranding(screen);
-  updateBootProgress(bootState.progress, bootState.label);
+  const estimate = estimatedBootProgress(now);
+  const remainingDuration = Math.max(0, bootState.driftDurationMs - (now - bootState.driftStartedAt));
+  paintBootProgress(screen, estimate, bootState.label, bootState.driftTarget, remainingDuration);
   if (bootState.timer) window.clearInterval(bootState.timer);
   bootState.timer = window.setInterval(() => {
-    if (!bootState.screen?.isConnected || bootState.progress >= 88) return;
-    updateBootProgress(Math.min(88, bootState.progress + 1));
-  }, 650);
+    if (!bootState.screen?.isConnected || bootState.finishing) return;
+    refreshBootEstimate();
+  }, BOOT_PROGRESS_INTERVAL_MS);
   return screen;
 }
 
@@ -174,16 +297,44 @@ function startBootScreen() {
 }
 
 function updateBootProgress(progress, label = "") {
-  bootState.progress = clamp(Number(progress) || 0, 0, 100);
+  const requested = clamp(Number(progress) || 0, 0, 100);
+  const now = bootClock();
+  bootState.progress = Math.max(estimatedBootProgress(now), requested);
+  bootState.driftStart = bootState.progress;
+  bootState.driftTarget = bootState.progress;
+  bootState.driftStartedAt = now;
+  bootState.driftDurationMs = 0;
+  bootState.driftVersion += 1;
   if (label) bootState.label = label;
   const screen = ensureBootScreen();
   if (!screen) return;
-  const fill = screen.querySelector("[data-pp-boot-fill]");
-  const percent = screen.querySelector("[data-pp-boot-percent]");
-  const text = screen.querySelector("[data-pp-boot-label]");
-  if (fill) fill.style.width = `${bootState.progress}%`;
-  if (percent) percent.textContent = `${Math.round(bootState.progress)}%`;
-  if (text && label) text.textContent = label;
+  paintBootProgress(screen, bootState.progress, bootState.label);
+}
+
+function setBootStage(progress, label, fakeCeiling) {
+  const now = bootClock();
+  const milestone = clamp(Number(progress) || 0, 0, 100);
+  const ceiling = clamp(Number(fakeCeiling) || milestone, milestone, 100);
+  const previousEstimate = estimatedBootProgress(now);
+  const stageElapsed = bootState.lastStageAt ? now - bootState.lastStageAt : BOOT_INITIAL_DRIFT_MS;
+  const duration = clamp(stageElapsed * 2.4, BOOT_MIN_DRIFT_MS, BOOT_MAX_DRIFT_MS);
+  const snapToMilestone = milestone <= 34 || milestone >= 100;
+  bootState.progress = snapToMilestone
+    ? Math.max(bootState.progress, previousEstimate, milestone)
+    : Math.max(bootState.progress, previousEstimate);
+  if (milestone <= 34) bootState.displayedProgress = Math.max(bootState.displayedProgress, Math.round(milestone));
+  if (milestone >= 100) bootState.displayedProgress = 100;
+  bootState.fakeCeiling = Math.max(bootState.fakeCeiling, ceiling);
+  bootState.driftStart = bootState.progress;
+  bootState.driftTarget = bootState.fakeCeiling;
+  bootState.driftStartedAt = now;
+  bootState.driftDurationMs = duration;
+  bootState.lastStageAt = now;
+  bootState.driftVersion += 1;
+  if (label) bootState.label = label;
+  const screen = ensureBootScreen();
+  if (!screen) return;
+  paintBootProgress(screen, bootState.progress, bootState.label, bootState.driftTarget, duration, bootState.driftVersion);
 }
 
 function removeBootScreen() {
@@ -194,6 +345,17 @@ function removeBootScreen() {
   bootState.timer = null;
   bootState.mountTimer = null;
   bootState.revealTimer = null;
+  bootState.finishing = false;
+  bootState.progress = 6;
+  bootState.displayedProgress = 6;
+  bootState.fakeCeiling = 31;
+  bootState.label = "Starting Foundry...";
+  bootState.lastStageAt = 0;
+  bootState.driftStart = 6;
+  bootState.driftTarget = 31;
+  bootState.driftStartedAt = 0;
+  bootState.driftDurationMs = BOOT_INITIAL_DRIFT_MS;
+  bootState.driftVersion += 1;
   bootState.observer?.disconnect?.();
   bootState.observer = null;
   bootState.screen?.remove();
@@ -202,17 +364,20 @@ function removeBootScreen() {
   document.documentElement?.classList?.remove?.("player-pilot-booting");
 }
 
-if (earlyUserIsPilot()) {
-  syncManagedNoCanvas(storedWorldSetting('useNoCanvas', true) === true);
-  startBootScreen();
-} else {
-  syncManagedNoCanvas(false);
+const initialUser = earlyCurrentUser();
+if (initialUser) {
+  if (earlyUserIsPilot(initialUser)) {
+    syncManagedNoCanvas(storedWorldSetting('useNoCanvas', true) === true);
+    startBootScreen();
+  } else {
+    syncManagedNoCanvas(false);
+  }
 }
 
 const TABS = [
   ["stats", "Details", "fa-chart-simple"],
   ["actions", "Actions", "fa-bolt"],
-  ["rolls", "Rolls", "fa-dice-d20"],
+  ["rolls", "Rolls", "pp-die-d20"],
   ["spells", "Spells", "fa-wand-magic-sparkles"],
   ["features", "Features", "fa-star"],
   ["inventory", "Inventory", "fa-sack-xmark"],
@@ -254,7 +419,7 @@ const state = {
   suppressSceneRenderUntil: 0,
   lastSceneReceivedAt: 0,
   modelCache: null,
-  resolutionWarningObserver: null,
+  startupNoticeObserver: null,
   nativePromptObserver: null
 };
 
@@ -463,15 +628,29 @@ function actorOwnedByAnyPlayer(actor) {
     .some((user) => actorOwnedByUser(actor, user.id));
 }
 
+function combatTokenIdsForScene(sceneId) {
+  const combat = game.combat;
+  const combatSceneId = String(combat?.scene?.id ?? combat?.sceneId ?? "");
+  if (!combat || (combatSceneId && combatSceneId !== String(sceneId ?? ""))) return [];
+  return asArray(combat.combatants)
+    .filter((combatant) => {
+      if (!combatant) return false;
+      if (combatant.defeated === true || combatant.isDefeated === true) return false;
+      const tokenDoc = combatant.token
+        ?? getSceneDoc(sceneId)?.tokens?.get?.(combatant.tokenId)
+        ?? asArray(getSceneDoc(sceneId)?.tokens).find((token) => String(token?.id ?? "") === String(combatant.tokenId ?? ""))
+        ?? null;
+      return tokenDoc?.hidden !== true;
+    })
+    .map((combatant) => String(combatant.token?.id ?? combatant.tokenId ?? ""))
+    .filter(Boolean);
+}
+
 function buildLocalSceneState(viewerUserId = game.user?.id) {
   const scene = getSceneDoc();
   if (!scene) return null;
   const sceneId = String(scene.id ?? "");
-  const combat = game.combat;
-  const combatSceneId = String(combat?.scene?.id ?? combat?.sceneId ?? "");
-  const combatTokenIds = combat && (!combatSceneId || combatSceneId === sceneId)
-    ? asArray(combat.combatants).map((combatant) => String(combatant.token?.id ?? combatant.tokenId ?? "")).filter(Boolean)
-    : [];
+  const combatTokenIds = combatTokenIdsForScene(sceneId);
   const controlledTokenIds = asArray(canvas?.tokens?.controlled)
     .map((token) => String(token.id ?? token.document?.id ?? ""))
     .filter(Boolean);
@@ -488,7 +667,8 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
       width: Number(td.width ?? 1),
       height: Number(td.height ?? 1),
       disposition: Number(td.disposition ?? 0),
-      statuses: actorConditionKeys(td.actor),
+      statuses: tokenConditionKeys(td),
+      effects: targetStateBadges(td),
       owned: actorOwnedByUser(td.actor, viewerUserId),
       playerOwned: actorOwnedByAnyPlayer(td.actor)
     }));
@@ -589,6 +769,52 @@ function actorConditionKeys(actor) {
   return Array.from(new Set(values
     .map((value) => fieldText(value).toLowerCase().replace(/[_\s]+/g, "-"))
     .filter(Boolean)));
+}
+
+function tokenConditionKeys(tokenDoc) {
+  return Array.from(new Set([
+    ...actorConditionKeys(tokenDoc?.actor),
+    ...asArray(tokenDoc?.statuses)
+      .map((value) => fieldText(value).toLowerCase().replace(/[_\s]+/g, "-"))
+      .filter(Boolean)
+  ]));
+}
+
+function targetStateBadges(tokenDoc) {
+  const actor = tokenDoc?.actor ?? game.actors?.get?.(tokenDoc?.actorId) ?? null;
+  const statusIndex = new Map(
+    asArray(CONFIG?.statusEffects)
+      .map((effect) => [String(effect?.id ?? "").trim().toLowerCase(), effect])
+      .filter(([id]) => !!id)
+  );
+  const seen = new Set();
+  const badges = [];
+  const pushBadge = (id, label, img = "") => {
+    const key = String(id || label || img).toLowerCase().trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    badges.push({
+      id: key,
+      label: cleanRulesText(label || id || "Effect"),
+      img: String(img ?? "").trim()
+    });
+  };
+  const defeatedId = String(CONFIG?.specialStatusEffects?.DEFEATED ?? "").trim().toLowerCase();
+  const statuses = tokenConditionKeys(tokenDoc)
+    .filter((status) => status && status !== "dead" && (!defeatedId || status !== defeatedId));
+  for (const status of statuses) {
+    const effect = statusIndex.get(status);
+    const labelKey = String(effect?.name ?? effect?.label ?? status).trim();
+    const label = game.i18n?.has?.(labelKey) ? game.i18n.localize(labelKey) : labelKey;
+    pushBadge(status, label, effect?.img ?? effect?.icon ?? "");
+  }
+  for (const effect of asArray(actor?.effects)) {
+    if (!effect || effect.disabled === true || effect.isSuppressed === true) continue;
+    const img = String(effect.img ?? effect.icon ?? "").trim();
+    if (!img) continue;
+    pushBadge(effect.id ?? effect.name ?? effect.label, effect.name ?? effect.label ?? "Effect", img);
+  }
+  return badges.slice(0, 8);
 }
 
 function unitLabel(unit) {
@@ -693,8 +919,9 @@ async function enrichRulesHtml(value, relativeTo = null) {
   if (!raw) return "";
   let html = raw;
   try {
-    if (globalThis.TextEditor?.enrichHTML) {
-      html = await TextEditor.enrichHTML(raw, {
+    const TextEditorImplementation = globalThis.foundry?.applications?.ux?.TextEditor?.implementation;
+    if (TextEditorImplementation?.enrichHTML) {
+      html = await TextEditorImplementation.enrichHTML(raw, {
         async: true,
         secrets: false,
         relativeTo
@@ -890,30 +1117,72 @@ function itemTargetInfo(item, activityId = "") {
     ? [activitySystem(selected), item?.system]
     : [item?.system, ...getItemActivities(item).map(activitySystem)];
   let count = 0;
+  let countSource = "";
   let type = "";
   let selfOnly = false;
+  let hasAreaTemplate = false;
   for (const source of candidates) {
     const target = source?.target ?? {};
     const affects = target.affects ?? {};
     const nextType = fieldText(affects.type, target.type, target.template?.type, target.area?.type);
     const nextCount = Number(affects.count ?? target.count ?? target.value ?? 0);
     if (nextType) type = nextType;
-    if (Number.isFinite(nextCount) && nextCount > 0) count = Math.max(count, nextCount);
+    if (Number.isFinite(nextCount) && nextCount > 0) {
+      count = Math.max(count, nextCount);
+      countSource = "structured";
+    }
     const lowered = String(nextType ?? "").toLowerCase();
     if (lowered.includes("self")) selfOnly = true;
+    if (fieldText(target.template?.type, target.area?.type)) hasAreaTemplate = true;
   }
-  const text = count > 0 && type ? `${count} ${type}` : capitalizeWords(type);
   const isWeaponAttack = item?.type === "weapon" || getItemActivities(item).some((activity) => String(activitySystem(activity)?.type ?? activity?.type ?? "").toLowerCase() === "attack");
-  if (isWeaponAttack && count <= 0) count = 1;
+  if (isWeaponAttack && count <= 0) {
+    count = 1;
+    countSource = "weapon";
+  }
   if (isWeaponAttack && !type) type = "creature";
   const description = htmlToPlain(item?.system?.description?.value ?? item?.system?.description ?? "").toLowerCase();
+  const targetNoun = "(?:creature|target|ally|enemy|object|token)";
+  const targetCountScales = new RegExp(
+    `\\b(?:one|an?|\\d+)\\s+additional\\s+${targetNoun}s?\\b|\\badditional\\s+${targetNoun}s?\\b[^.]{0,100}\\b(?:spell slot|slot level|cast level|rank)\\b`,
+    "i"
+  ).test(description);
+  const explicitMultiple = new RegExp(
+    `\\b(?:up to|any number of|one or more|two|three|four|five|six|seven|eight|nine|ten|each|all)\\s+(?:(?:willing|hostile|different|other)\\s+)?${targetNoun}s?\\b`,
+    "i"
+  ).test(description);
+  const singularPattern = new RegExp(
+    `\\b(?:a|an|one)\\s+(?:(?:willing|hostile|unconscious|different|other)\\s+)?${targetNoun}\\b`,
+    "gi"
+  );
+  const singularMentions = Array.from(description.matchAll(singularPattern)).length;
+  const explicitSingular = singularMentions === 1;
+  const singularTargetType = new RegExp(`\\b${targetNoun}\\b`, "i").test(type);
+  if (count <= 0 && singularTargetType && explicitSingular && !explicitMultiple && !targetCountScales && !hasAreaTemplate) {
+    count = 1;
+    countSource = "description";
+  }
+  const limitKnown = count > 0 && !targetCountScales;
+  const statedCount = count;
+  if (!limitKnown) count = 0;
   const allowSelf = selfOnly || (
     /(creature|ally|willing)/i.test(type)
     && !/(enemy|hostile)/i.test(type)
     && !/\b(other|another) creature\b/i.test(description)
   );
-  const needsTarget = !selfOnly && (isWeaponAttack || count > 0 || /(creature|enemy|ally|allies|enemies|object|objects|token)/i.test(type));
-  return { count, type, text: count > 0 && type ? `${count} ${type}` : capitalizeWords(type), needsTarget, selfOnly, allowSelf };
+  const needsTarget = !selfOnly && (isWeaponAttack || statedCount > 0 || /(creature|enemy|ally|allies|enemies|object|objects|token)/i.test(type));
+  return {
+    count,
+    statedCount,
+    countSource,
+    limitKnown,
+    limitReason: targetCountScales ? "Target count changes with cast level." : "",
+    type,
+    text: limitKnown && count > 0 && type ? `${count} ${type}` : capitalizeWords(type),
+    needsTarget,
+    selfOnly,
+    allowSelf
+  };
 }
 
 function itemRangeLabel(item) {
@@ -998,6 +1267,17 @@ function normalizeItem(item, group = "items") {
     spellDetails: spellDetailRows(item),
     usesText: itemUsesText(item),
     badges: itemBadges(item)
+  };
+}
+
+function normalizeGenericItem(item, group = "items") {
+  return {
+    ...normalizeItem(item, group),
+    canPrepare: false,
+    preparationLocked: true,
+    equippable: false,
+    equipped: false,
+    usable: true
   };
 }
 
@@ -1209,6 +1489,34 @@ function itemRequiresConcentration(item) {
   });
 }
 
+function isConcentrationEffect(effect) {
+  if (!effect || effect.disabled === true || effect.isSuppressed === true) return false;
+  const statuses = asArray(effect.statuses).map((status) => String(status ?? "").toLowerCase());
+  const statusId = String(effect.flags?.core?.statusId ?? "").toLowerCase();
+  const name = String(effect.name ?? effect.label ?? "").toLowerCase();
+  return statuses.some((status) => status.includes("concentrat"))
+    || statusId.includes("concentrat")
+    || name.includes("concentrat");
+}
+
+function actorConcentrationEffects(actor) {
+  const tracked = asArray(actor?.concentration?.effects)
+    .filter((effect) => effect?.disabled !== true && effect?.isSuppressed !== true);
+  if (tracked.length) return tracked;
+  return asArray(actor?.effects).filter(isConcentrationEffect);
+}
+
+function concentrationEffectLabel(actor, effect) {
+  const itemData = effect?.getFlag?.("dnd5e", "item") ?? effect?.flags?.dnd5e?.item ?? {};
+  const itemName = fieldText(
+    itemData?.data?.name,
+    actor?.items?.get?.(itemData?.id)?.name
+  );
+  if (itemName) return itemName;
+  const effectName = fieldText(effect?.name, effect?.label, "an active spell");
+  return effectName.replace(/^concentrat(?:ing|ion)\s*:\s*/i, "") || "an active spell";
+}
+
 function hasItemProperty(item, key) {
   const props = item?.system?.properties;
   const wanted = String(key ?? "").toLowerCase();
@@ -1250,7 +1558,7 @@ const GENERIC_ADAPTER = {
     };
   },
   groups(actor) {
-    const items = asArray(actor?.items).map((item) => normalizeItem(item, item.type || "items"));
+    const items = asArray(actor?.items).map((item) => normalizeGenericItem(item, item.type || "items"));
     return {
       actions: items.filter(itemBelongsInActions),
       spells: items.filter((item) => item.type === "spell"),
@@ -1258,6 +1566,9 @@ const GENERIC_ADAPTER = {
       inventory: items.filter((item) => !["spell", "feat", "action", "classfeature"].includes(item.type)),
       checks: []
     };
+  },
+  canUseItem() {
+    return true;
   },
   async useItem(actor, item, options = {}) {
     const selected = selectedItemActivity(item, options.activityId);
@@ -1412,18 +1723,11 @@ const DND5E_ADAPTER = {
     return choices;
   },
   concentrationWarning(actor, item) {
-    if (item?.type !== "spell") return "";
-    const system = item.system ?? {};
-    const needs = system.components?.concentration === true
-      || system.duration?.concentration === true
-      || String(system.duration?.units ?? "").toLowerCase() === "concentration"
-      || htmlToPlain(system.description?.value ?? "").toLowerCase().includes("concentration");
-    if (!needs) return "";
-    const active = asArray(actor?.effects).find((effect) => {
-      const id = String(effect.statuses?.values?.().next?.().value ?? effect.statuses?.[0] ?? effect.flags?.core?.statusId ?? "").toLowerCase();
-      return id.includes("concentration") || String(effect.name ?? "").toLowerCase().includes("concentrat");
-    });
-    return active ? `You are already concentrating on ${active.name ?? "an effect"}.` : "This uses concentration.";
+    if (item?.type !== "spell" || !itemRequiresConcentration(item)) return "";
+    const active = actorConcentrationEffects(actor)[0];
+    return active
+      ? `This will replace concentration on ${concentrationEffectLabel(actor, active)}.`
+      : "This uses concentration.";
   },
   ammoChoices(actor, item) {
     if (!actor || !item) return [];
@@ -1455,6 +1759,12 @@ const DND5E_ADAPTER = {
       if (options.ammoItemId) {
         useOptions.ammunition = options.ammoItemId;
         useOptions.ammo = options.ammoItemId;
+      }
+      if (options.replaceConcentrationEffectId) {
+        useOptions.concentration = {
+          begin: true,
+          end: String(options.replaceConcentrationEffectId)
+        };
       }
       const selected = selectedItemActivity(item, options.activityId);
       if (selected?.activity && typeof selected.activity.use === "function") {
@@ -2203,13 +2513,30 @@ const PF2E_ADAPTER = {
     const strikes = asArray(actor?.system?.actions).map(normalizePf2eStrike);
     const checks = [];
     for (const [key, skill] of Object.entries(actor?.skills ?? actor?.system?.skills ?? {})) {
-      checks.push({ kind: "skill", key, name: skill?.label ?? key.toUpperCase(), badge: "Skill", category: "skills", formula: d20Formula(skill?.mod ?? skill?.total ?? 0) });
+      checks.push({
+        kind: "skill",
+        key,
+        name: skill?.label ?? key.toUpperCase(),
+        badge: "Skill",
+        category: "skills",
+        formula: d20Formula(skill?.mod ?? skill?.total ?? 0),
+        ability: String(skill?.attribute ?? skill?.statistic?.attribute ?? skill?.check?.attribute ?? "")
+      });
     }
+    const saveAbilities = { fortitude: "con", fort: "con", reflex: "dex", ref: "dex", will: "wis" };
     for (const [key, save] of Object.entries(actor?.saves ?? actor?.system?.saves ?? {})) {
-      checks.push({ kind: "save", key, name: save?.label ?? key.toUpperCase(), badge: "Save", category: "saves", formula: d20Formula(save?.mod ?? save?.total ?? 0) });
+      checks.push({
+        kind: "save",
+        key,
+        name: save?.label ?? key.toUpperCase(),
+        badge: "Save",
+        category: "saves",
+        formula: d20Formula(save?.mod ?? save?.total ?? 0),
+        ability: String(save?.attribute ?? saveAbilities[String(key).toLowerCase()] ?? "")
+      });
     }
     if (actor?.perception) {
-      checks.unshift({ kind: "perception", key: "perception", name: "Perception", badge: "Perception", category: "checks", formula: d20Formula(actor.perception.mod ?? 0) });
+      checks.unshift({ kind: "perception", key: "perception", name: "Perception", badge: "Perception", category: "checks", formula: d20Formula(actor.perception.mod ?? 0), ability: "wis" });
     }
     const actionItems = normalized.filter((item) => {
       if (item.type === "spell") return item.usable === true;
@@ -2363,6 +2690,12 @@ function pf2eSyntheticRollEvent(dataset = {}) {
   };
 }
 
+function normalizeItemForAdapter(item, adapter = systemAdapter(item?.actor)) {
+  if (adapter?.id === "pf2e") return normalizePf2eItem(item);
+  if (adapter?.id === "dnd5e") return normalizeItem(item);
+  return normalizeGenericItem(item);
+}
+
 function buildModel(actor) {
   const adapter = systemAdapter(actor);
   return {
@@ -2506,14 +2839,17 @@ function registerSettings() {
     default: "manual"
   });
 
-  game.settings.register(MODULE_ID, "journalImageSeconds", {
-    name: localize("PlayerPilot.settings.journalDuration.name"),
-    hint: localize("PlayerPilot.settings.journalDuration.hint"),
+  game.settings.register(MODULE_ID, "sharedDocumentPopups", {
+    name: localize("PlayerPilot.settings.sharedDocumentPopups.name"),
+    hint: localize("PlayerPilot.settings.sharedDocumentPopups.hint"),
     scope: "world",
     config: true,
-    type: Number,
-    range: { min: 5, max: 120, step: 5 },
-    default: 20
+    type: Boolean,
+    default: true,
+    onChange: () => {
+      applySharedDocumentPopupMode();
+      notifyPilotsToRefresh();
+    }
   });
 
   game.settings.register(MODULE_ID, "suppressPlayerAudio", {
@@ -2553,6 +2889,10 @@ function notifyPilotsToRefresh() {
   sendSocket("settingsChanged", { targetUserIds: userIdsForPilots() });
 }
 
+function sharedDocumentPopupsEnabled() {
+  return setting("sharedDocumentPopups", true) !== false;
+}
+
 async function enforceNoCanvasIfNeeded() {
   if (!userIsPilot()) return;
   if (setting("useNoCanvas", true) !== true) return;
@@ -2567,41 +2907,66 @@ async function enforceNoCanvasIfNeeded() {
   }
 }
 
-function suppressMobileResolutionWarnings(root = document) {
-  if (!userIsPilot()) return;
-  if (window.innerWidth >= 1024 && window.innerHeight >= 768) return;
-  const phrases = [
-    "requires a usable window dimensions",
-    "requires a minimum screen resolution",
-    "must enlarge the size of your window",
-    "minimum usable viewport dimensions"
-  ];
-  root.querySelectorAll?.("#notifications > .notification").forEach((notification) => {
-    const text = String(notification.textContent ?? "").toLowerCase();
-    if (phrases.some((phrase) => text.includes(phrase))) notification.remove();
-  });
+function isResolutionNotice(notification) {
+  const text = String(notification.textContent ?? "").toLowerCase();
+  return text.includes("requires usable window dimensions")
+    || text.includes("requires a usable window dimensions");
 }
 
-function installMobileResolutionWarningSuppression() {
-  if (!userIsPilot() || state.resolutionWarningObserver) return;
-  suppressMobileResolutionWarnings();
-  state.resolutionWarningObserver = new MutationObserver((mutations) => {
+function dismissFoundryNotification(notification) {
+  if (!(notification instanceof HTMLElement) || !notification.isConnected) return;
+  const id = Number(notification.dataset.id);
+  if (Number.isInteger(id) && id > 0) ui.notifications?.remove?.(id);
+  else notification.remove();
+}
+
+function autoCloseFoundryNotification(notification) {
+  if (!userIsPilot()) return;
+  if (!(notification instanceof HTMLElement) || !notification.matches("#notifications > .notification")) return;
+  if (notification.classList.contains("progress") || notification.dataset.ppAutoClose === "1") return;
+  notification.dataset.ppAutoClose = "1";
+  if (isResolutionNotice(notification)) {
+    dismissFoundryNotification(notification);
+    return;
+  }
+  window.setTimeout(() => {
+    dismissFoundryNotification(notification);
+  }, STARTUP_NOTICE_LIFETIME_MS);
+}
+
+function scheduleFoundryNotificationAutoClose(root = document) {
+  if (!userIsPilot()) return;
+  if (root instanceof HTMLElement && root.matches?.("#notifications > .notification")) {
+    autoCloseFoundryNotification(root);
+  }
+  root.querySelectorAll?.("#notifications > .notification").forEach(autoCloseFoundryNotification);
+}
+
+function installFoundryNotificationAutoClose() {
+  if (!userIsPilot() || state.startupNoticeObserver) return;
+  scheduleFoundryNotificationAutoClose();
+  const notifications = document.querySelector("#notifications");
+  if (!(notifications instanceof HTMLElement)) return;
+  state.startupNoticeObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (!mutation.addedNodes.length) continue;
-      const targetIsNotifications = mutation.target instanceof Element
-        && (mutation.target.id === "notifications" || !!mutation.target.closest?.("#notifications"));
-      const addedNotification = Array.from(mutation.addedNodes).some((node) => node instanceof Element
-        && (node.id === "notifications" || node.classList.contains("notification") || !!node.querySelector?.(".notification")));
-      if (targetIsNotifications || addedNotification) {
-        suppressMobileResolutionWarnings(document);
-        break;
+      for (const node of mutation.addedNodes) {
+        if (node instanceof HTMLElement) scheduleFoundryNotificationAutoClose(node);
       }
     }
   });
-  state.resolutionWarningObserver.observe(document.body, { childList: true, subtree: true });
+  state.startupNoticeObserver.observe(notifications, { childList: true });
+}
+
+function applySharedDocumentPopupMode() {
+  const active = userIsPilot();
+  const enabled = active && sharedDocumentPopupsEnabled();
+  document.body?.classList?.toggle?.("player-pilot-shared-popups", enabled);
+  document.body?.classList?.toggle?.("player-pilot-shared-popups-disabled", active && !enabled);
 }
 
 function mountPilotShell() {
+  applySharedDocumentPopupMode();
   if (state.shell?.isConnected) return;
   state.shell?.remove?.();
   state.shell = null;
@@ -2627,7 +2992,7 @@ function pilotShellIsPainted() {
 }
 
 function revealPilotShell() {
-  updateBootProgress(96, "Building your controls...");
+  setBootStage(96, "Building your controls...", 99);
   renderShell();
   let attempts = 0;
   const confirmPaint = () => {
@@ -2649,15 +3014,28 @@ function revealPilotShell() {
         bootState.revealTimer = window.setTimeout(confirmPaint, Math.max(125, BOOT_MIN_VISIBLE_MS - visibleFor));
         return;
       }
-      updateBootProgress(100, "Ready");
-      bootState.revealTimer = window.setTimeout(() => {
-        if (pilotShellIsPainted()) removeBootScreen();
-        else confirmPaint();
-      }, BOOT_READY_HOLD_MS);
+      if (bootState.finishing) return;
+      bootState.finishing = true;
+      setBootStage(100, "Ready", 100);
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        if (!pilotShellIsPainted()) {
+          bootState.finishing = false;
+          confirmPaint();
+          return;
+        }
+        bootState.revealTimer = window.setTimeout(() => {
+          if (pilotShellIsPainted()) removeBootScreen();
+          else {
+            bootState.finishing = false;
+            confirmPaint();
+          }
+        }, BOOT_READY_HOLD_MS);
+      }));
       return;
     }
+    bootState.finishing = false;
     attempts += 1;
-    if (attempts === 12) updateBootProgress(97, 'Still preparing your controls...');
+    if (attempts === 12) setBootStage(97, 'Still preparing your controls...', 99);
     bootState.revealTimer = window.setTimeout(confirmPaint, 125);
   };
   window.requestAnimationFrame(() => window.requestAnimationFrame(confirmPaint));
@@ -2667,11 +3045,15 @@ function unmountPilotShell() {
   document.body.classList.remove("player-pilot-active");
   document.body.classList.remove("player-pilot-modal-open");
   document.body.classList.remove("player-pilot-native-prompt-open");
+  document.body.classList.remove("player-pilot-shared-popups");
+  document.body.classList.remove("player-pilot-shared-popups-disabled");
   removeBootScreen();
   state.shell?.remove();
   state.shell = null;
-  state.resolutionWarningObserver?.disconnect?.();
-  state.resolutionWarningObserver = null;
+  state.sharedImage?.remove?.();
+  state.sharedImage = null;
+  state.startupNoticeObserver?.disconnect?.();
+  state.startupNoticeObserver = null;
   state.nativePromptObserver?.disconnect?.();
   state.nativePromptObserver = null;
   invalidateModelCache();
@@ -2763,7 +3145,7 @@ function renderNoActor() {
 function renderStatCard(key, icon, label, value, controls = "") {
   return `
     <div class="pp-stat ${escapeHtml(key)}">
-      <div class="pp-stat-icon"><i class="fas ${escapeHtml(icon)}"></i></div>
+      <div class="pp-stat-icon">${renderInterfaceIcon(icon)}</div>
       <div class="pp-stat-copy">
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value ?? "-")}</strong>
@@ -2814,11 +3196,18 @@ function renderAbilityScores(summary = {}) {
 function abilityDisplayIcon(key) {
   return ({
     str: "fa-dumbbell",
+    strength: "fa-dumbbell",
     dex: "fa-person-running",
+    dexterity: "fa-person-running",
     con: "fa-heart-pulse",
+    constitution: "fa-heart-pulse",
     int: "fa-brain",
+    intelligence: "fa-brain",
     wis: "fa-eye",
-    cha: "fa-masks-theater"
+    wisdom: "fa-eye",
+    cha: "fa-masks-theater",
+    charisma: "fa-masks-theater",
+    perception: "fa-binoculars"
   })[String(key ?? "").toLowerCase()] ?? "fa-circle";
 }
 
@@ -2856,7 +3245,7 @@ function renderTabs() {
     <nav class="pp-tabs ${state.navOpen ? "open" : ""}" aria-label="Player Pilot tabs">
       ${availableTabs.map(([key, label, icon]) => `
         <button class="pp-tab" type="button" data-action="tab" data-tab="${key}" aria-selected="${state.activeTab === key ? "true" : "false"}">
-          <i class="fas ${escapeHtml(icon)}"></i>
+          ${renderInterfaceIcon(icon)}
           <span>${escapeHtml(label)}</span>
         </button>
       `).join("")}
@@ -2958,14 +3347,14 @@ function renderStatsView(model) {
           <span>Initiative Modifier</span>
           <strong>${escapeHtml(summary.initiative ?? "+0")}</strong>
           <button class="pp-initiative-roll" type="button" data-action="${model.adapter.id === "pf2e" ? "pf2e-initiative" : "roll-check"}" data-kind="initiative" data-key="initiative" title="${model.adapter.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative"}">
-            <img src="${escapeHtml(`${DND_ICON_ROOT}/dice/d20.svg`)}" alt="Roll initiative">
+            ${renderDieGlyph(20)}
           </button>
         </div>
         <div class="pp-status-grid">
           ${renderStatCard("ac", "fa-shield-halved", "Armor Class", summary.ac)}
           ${renderStatCard("speed", "fa-person-running", "Speed", summary.speed)}
           ${renderStatCard("level", "fa-star", "Level", summary.level ?? summary.resource ?? "-")}
-          ${renderStatCard("prof", "fa-dice-d20", model.adapter.id === "pf2e" ? "Modifiers" : "Proficiency", summary.prof ?? summary.resource ?? "-")}
+          ${renderStatCard("prof", "pp-die-d20", model.adapter.id === "pf2e" ? "Modifiers" : (model.adapter.id === "dnd5e" ? "Proficiency" : "System"), summary.prof ?? summary.resource ?? "-")}
         </div>
         <div class="pp-detail-strips">${exhaustionControls}${deathControls}${pf2eControls}</div>
         ${renderAbilityScores(summary)}
@@ -3062,8 +3451,19 @@ const PF2E_QUICK_FILTERS = {
   ]
 };
 
+const GENERIC_QUICK_FILTERS = {
+  actions: QUICK_FILTERS.actions,
+  actionTiming: [["all", "All Actions", "fa-layer-group"]],
+  actionSpellTraits: [["all", "All Spells", "fa-wand-magic-sparkles"]],
+  spells: [["all", "All"]],
+  features: QUICK_FILTERS.features,
+  inventory: QUICK_FILTERS.inventory
+};
+
 function quickFilterOptions(key) {
-  if (String(game.system?.id ?? "").toLowerCase() === "pf2e" && PF2E_QUICK_FILTERS[key]) return PF2E_QUICK_FILTERS[key];
+  const systemId = currentSystemId();
+  if (systemId === "pf2e" && PF2E_QUICK_FILTERS[key]) return PF2E_QUICK_FILTERS[key];
+  if (systemId !== "dnd5e" && GENERIC_QUICK_FILTERS[key]) return GENERIC_QUICK_FILTERS[key];
   return QUICK_FILTERS[key] ?? [];
 }
 
@@ -3212,7 +3612,7 @@ function renderRollsView(model) {
     <section class="pp-view active">
       ${renderSearchInput("Search rolls...")}
       <div class="pp-section">
-        ${renderSectionHeader("Rolls", "fa-dice-d20", model.adapter.label)}
+        ${renderSectionHeader("Rolls", "pp-die-d20", model.adapter.label)}
         ${renderCheckGroups(model.groups.checks ?? [])}
       </div>
     </section>
@@ -3314,14 +3714,14 @@ function renderActionGroup(title, items = [], adapterId = "") {
               : loweredTitle.includes("other") ? "other" : "action1")
     : (loweredTitle.includes("bonus") ? "bonus" : loweredTitle.includes("reaction") ? "reaction" : loweredTitle.includes("other") ? "other" : "action");
   const categories = [
-    ["weapon", "Weapons", "items/weapon.svg", "fa-sword"],
-    ["spell", "Spells", "items/spell.svg", "fa-wand-magic-sparkles"],
-    ["item", "Items", "items/consumable.svg", "fa-flask"],
-    ["feature", "Class Features", "items/feature.svg", "fa-star"]
+    ["weapon", "Weapons", "sword.svg"],
+    ["spell", "Spells", "book.svg"],
+    ["item", "Items", "item-bag.svg"],
+    ["feature", "Class Features", "upgrade.svg"]
   ];
   return `
     <div class="pp-section pp-action-section">
-      ${categories.map(([category, label, icon, pf2eIcon]) => {
+      ${categories.map(([category, label, icon]) => {
         const list = filtered.filter((item) => actionItemCategory(item) === category);
         if (!list.length) return "";
         return `
@@ -3331,9 +3731,7 @@ function renderActionGroup(title, items = [], adapterId = "") {
                 <i class="fas ${escapeHtml(sectionIcon(key))}"></i>
                 <span>${escapeHtml(title)}</span>
                 <b>-</b>
-                ${adapterId === "pf2e"
-                  ? `<i class="fas ${escapeHtml(pf2eIcon)}"></i>`
-                  : `<img src="${escapeHtml(`${DND_ICON_ROOT}/${icon}`)}" alt="">`}
+                <img src="${escapeHtml(`${CORE_ICON_ROOT}/${icon}`)}" alt="">
                 <span>${escapeHtml(label)}</span>
               </h2>
               <span class="pp-header-count">${escapeHtml(list.length)}</span>
@@ -3378,7 +3776,7 @@ function sectionIcon(key) {
 function renderSectionHeader(title, icon = "fa-diamond", count = null) {
   return `
     <div class="pp-section-header pp-big-header">
-      <h2><i class="fas ${escapeHtml(icon)}"></i><span>${escapeHtml(title)}</span></h2>
+      <h2>${renderInterfaceIcon(icon)}<span>${escapeHtml(title)}</span></h2>
       ${count === null ? "" : `<span class="pp-header-count">${escapeHtml(count)}</span>`}
     </div>
   `;
@@ -3696,7 +4094,6 @@ function renderItemCard(item, { showSpellLevel = true, usesInControls = false } 
 
 function renderPf2eStrikeCard(item) {
   const strike = item.pf2eStrike;
-  const variants = strike.variants?.length ? strike.variants : [{ index: 0, label: "Attack", modifier: NaN }];
   const searchText = `${item.name} strike weapon ${item.badges?.join(" ") ?? ""}`;
   return `
     <article class="pp-card pp-searchable ${item.usable ? "" : "pp-item-unequipped"}" data-search="${escapeHtml(searchText)}">
@@ -3704,14 +4101,13 @@ function renderPf2eStrikeCard(item) {
       <div class="pp-card-main">
         <div class="pp-card-title"><button class="pp-card-title-btn" type="button" data-action="item-info" data-item-id="${escapeHtml(strike.itemId)}">${escapeHtml(item.name)}</button></div>
         <div class="pp-card-meta">${(item.badges ?? []).map(renderSmartBadge).join("")}</div>
-        <div class="pp-strike-actions">
-          ${variants.map((variant) => `
-            <button class="pp-action-btn primary" type="button" data-action="pf2e-strike" data-operation="attack" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}" data-variant-index="${escapeHtml(variant.index)}" ${item.usable ? "" : "disabled"}>
-              ${escapeHtml(variant.label)}${Number.isFinite(variant.modifier) ? ` ${escapeHtml(signedMod(variant.modifier))}` : ""}
-            </button>
-          `).join("")}
-          ${strike.hasDamage ? `<button class="pp-action-btn" type="button" data-action="pf2e-strike" data-operation="damage" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}">Damage</button>` : ""}
-          ${strike.hasCritical ? `<button class="pp-action-btn" type="button" data-action="pf2e-strike" data-operation="critical" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}">Critical</button>` : ""}
+      </div>
+      <div class="pp-card-primary-controls">
+        <div></div>
+        <div>
+          <button class="pp-use-compact" type="button" data-action="pf2e-strike" data-operation="flow" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}" ${item.usable ? "" : "disabled"}>
+            <i class="fas fa-burst"></i><span>Strike</span>
+          </button>
         </div>
       </div>
     </article>
@@ -3738,7 +4134,7 @@ function renderCheckCard(check) {
   const mod = signedMod(parseD20Mod(check.formula ?? "d20"));
   return `
     <article class="pp-card pp-roll-card pp-searchable" data-search="${escapeHtml(searchText)}">
-      <i class="fas ${escapeHtml(rollCardIcon(check))} pp-roll-type-icon" aria-hidden="true"></i>
+      ${renderInterfaceIcon(rollCardIcon(check), "pp-roll-type-icon")}
       <div class="pp-card-main">
         <div class="pp-card-title"><span>${escapeHtml(check.name)}</span></div>
         <div class="pp-roll-line">
@@ -3776,7 +4172,7 @@ function renderAbilityRollLine(label, check) {
 function renderD20RollButton(check) {
   return `
     <button class="pp-roll-die-btn" type="button" data-action="roll-check" data-kind="${escapeHtml(check.kind)}" data-key="${escapeHtml(check.key)}" title="Roll ${escapeHtml(check.name)}">
-      <img src="${escapeHtml(`${DND_ICON_ROOT}/dice/d20.svg`)}" alt="Roll d20">
+      ${renderDieGlyph(20)}
     </button>
   `;
 }
@@ -3784,29 +4180,50 @@ function renderD20RollButton(check) {
 function rollCardIcon(check = {}) {
   const skillIcons = {
     acr: "fa-person-running",
+    acrobatics: "fa-person-running",
     ani: "fa-paw",
     arc: "fa-hat-wizard",
+    arcana: "fa-hat-wizard",
     ath: "fa-dumbbell",
+    athletics: "fa-dumbbell",
+    crafting: "fa-hammer",
     dec: "fa-masks-theater",
+    deception: "fa-masks-theater",
+    diplomacy: "fa-handshake",
     his: "fa-landmark",
     ins: "fa-eye",
     itm: "fa-face-angry",
+    intimidation: "fa-face-angry",
     inv: "fa-magnifying-glass",
     med: "fa-kit-medical",
+    medicine: "fa-kit-medical",
     nat: "fa-leaf",
+    nature: "fa-leaf",
+    occultism: "fa-eye",
     prc: "fa-binoculars",
     prf: "fa-music",
+    performance: "fa-music",
     per: "fa-comments",
+    perception: "fa-binoculars",
     rel: "fa-book",
+    religion: "fa-book",
+    society: "fa-landmark",
     slt: "fa-hand",
     ste: "fa-user-ninja",
-    sur: "fa-compass"
+    stealth: "fa-user-ninja",
+    sur: "fa-compass",
+    survival: "fa-compass",
+    thievery: "fa-hand"
   };
-  const skill = skillIcons[String(check.key ?? "").toLowerCase()];
+  const key = String(check.key ?? "").toLowerCase();
+  const skill = skillIcons[key];
   if (skill) return skill;
+  if (["fortitude", "fort"].includes(key)) return "fa-heart-pulse";
+  if (["reflex", "ref"].includes(key)) return "fa-person-running";
+  if (key === "will") return "fa-brain";
   if (check.ability) return abilityDisplayIcon(check.ability);
   if (String(check.kind ?? "").toLowerCase().includes("save")) return "fa-shield-halved";
-  return "fa-dice-d20";
+  return "pp-die-d20";
 }
 
 function compactD20Formula(formula) {
@@ -3826,7 +4243,7 @@ function renderTargetsView() {
   const scene = state.scene ?? buildLocalSceneState();
   const selected = selectedTargetSet(scene?.id ?? "");
   const tokens = displayedTargetTokens(scene);
-  const source = scene?.combatTokenIds?.length ? "Combatants" : ((scene?.manualTargetIds?.length || scene?.manualTargetActorIds?.length) ? "Players + GM Added" : "Player Tokens");
+  const source = scene?.combatTokenIds?.length ? "Combat + Allowed Targets" : ((scene?.manualTargetIds?.length || scene?.manualTargetActorIds?.length) ? "Players + GM Added" : "Player Tokens");
   return `
     <section class="pp-view active">
       <div class="pp-section">
@@ -3850,10 +4267,28 @@ function displayedTargetTokens(scene = state.scene) {
   const tokens = scene?.tokens ?? [];
   if (!tokens.length) return [];
   const combatIds = new Set(scene?.combatTokenIds ?? []);
-  if (combatIds.size) return tokens.filter((token) => combatIds.has(token.id));
   const manualIds = new Set(scene?.manualTargetIds ?? []);
   const manualActorIds = new Set(scene?.manualTargetActorIds ?? []);
-  return tokens.filter((token) => token.owned || token.playerOwned || manualIds.has(token.id) || manualActorIds.has(token.actorId));
+  return tokens.filter((token) => {
+    const baseAllowed = token.owned || token.playerOwned || manualIds.has(token.id) || manualActorIds.has(token.actorId);
+    return baseAllowed || combatIds.has(token.id);
+  });
+}
+
+function renderTargetStateBadges(token = {}) {
+  const effects = Array.isArray(token.effects) ? token.effects : [];
+  if (!effects.length) return "";
+  return `
+    <span class="pp-target-states" aria-label="Target effects">
+      ${effects.map((effect) => {
+        const label = cleanRulesText(effect?.label ?? effect?.id ?? "Effect");
+        const img = String(effect?.img ?? "").trim();
+        return img
+          ? `<img class="pp-target-state-badge" src="${escapeHtml(img)}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}">`
+          : `<span class="pp-target-state-badge pp-target-state-text" title="${escapeHtml(label)}">${escapeHtml(label.slice(0, 2).toUpperCase())}</span>`;
+      }).join("")}
+    </span>
+  `;
 }
 
 function renderTokenRow(token, selected) {
@@ -3865,6 +4300,7 @@ function renderTokenRow(token, selected) {
         <div class="pp-card-title"><span>${escapeHtml(token.name)}</span></div>
         <div class="pp-card-meta">
           ${token.actorId === state.actorId ? `<span class="pp-badge good">Your character</span>` : ""}
+          ${renderTargetStateBadges(token)}
         </div>
       </div>
       <button class="pp-action-btn pp-target-toggle ${isSelected ? "primary" : ""}" type="button" data-action="target-toggle" data-token-id="${escapeHtml(token.id)}">${isSelected ? "Targeted" : "Target"}</button>
@@ -4297,7 +4733,7 @@ async function openItemInfoDialog(itemId) {
   if (!item) return;
   const actor = currentActor();
   const adapter = actor ? systemAdapter(actor) : GENERIC_ADAPTER;
-  const normalized = adapter.id === "pf2e" ? normalizePf2eItem(item) : normalizeItem(item);
+  const normalized = normalizeItemForAdapter(item, adapter);
   const canUse = normalized.usable !== false;
   const description = await enrichRulesHtml(item.system?.description?.value ?? item.system?.description ?? "", item);
   openModal(`
@@ -4319,7 +4755,31 @@ async function openItemInfoDialog(itemId) {
   });
 }
 
-function openUseDialog(itemId) {
+function openConcentrationBreakDialog(itemId, actor, item, effect) {
+  const currentName = concentrationEffectLabel(actor, effect);
+  openModal(`
+    <h2>Break Concentration First</h2>
+    <div class="pp-concentration-gate">
+      <i class="fas fa-brain"></i>
+      <div>
+        <span>Currently concentrating on</span>
+        <strong>${escapeHtml(currentName)}</strong>
+      </div>
+    </div>
+    <p><strong>${escapeHtml(itemDisplayName(item))}</strong> also requires concentration. End ${escapeHtml(currentName)} before continuing with this use?</p>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+      <button class="pp-button primary" type="button" data-modal-action="replaceConcentration">Break &amp; Continue</button>
+    </div>
+  `, {
+    replaceConcentration: async () => {
+      closeModal();
+      openUseDialog(itemId, { approvedConcentrationId: String(effect.id ?? "") });
+    }
+  });
+}
+
+function openUseDialog(itemId, flowOptions = {}) {
   if (pilotPaused()) {
     warnPaused();
     return;
@@ -4336,23 +4796,47 @@ function openUseDialog(itemId) {
     ui.notifications?.warn?.(message);
     return;
   }
+  const activeConcentration = adapter.id === "dnd5e" && item.type === "spell" && itemRequiresConcentration(item)
+    ? actorConcentrationEffects(actor)[0] ?? null
+    : null;
+  if (activeConcentration && String(activeConcentration.id ?? "") !== String(flowOptions.approvedConcentrationId ?? "")) {
+    openConcentrationBreakDialog(itemId, actor, item, activeConcentration);
+    return;
+  }
   const slots = adapter.spellSlotChoices?.(actor, item) ?? [];
   const ammo = adapter.ammoChoices?.(actor, item) ?? [];
   const concentration = adapter.concentrationWarning?.(actor, item) ?? "";
-  const normalized = adapter.id === "pf2e" ? normalizePf2eItem(item) : normalizeItem(item);
+  const normalized = normalizeItemForAdapter(item, adapter);
   const activities = usableItemActivities(item);
   const playerChoice = itemPlayerChoice(item, actor);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
   const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (adapter.id === "pf2e" ? pf2eSpellRank(item) : "") : "");
+  const baseCastLevel = item.type === "spell"
+    ? (adapter.id === "pf2e" ? pf2eSpellRank(item) : Number(item.system?.level ?? 0))
+    : "";
   const instructions = collectRollInstructions(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
+  const baseInstructionsFor = (activityId = "") => collectRollInstructions(item, actor, {
+    castLevel: baseCastLevel,
+    activityId
+  });
+  const hasFollowupRolls = (entries = []) => entries.some((entry) => entry.formula || entry.nativeAction);
   const sneakAttack = adapter.id === "dnd5e" && item.type === "weapon" ? getSneakAttackOption(actor) : null;
   const targetInfoFor = (activityId = "") => adapter.targetInfo?.(item, activityId) ?? itemTargetInfo(item, activityId);
   const rangeFeetFor = (activityId = "") => adapter.rangeFeet?.(item, activityId) ?? getItemRangeFeet(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget;
-  const spellStep = item.type === "spell";
+  const spellStep = item.type === "spell" && (adapter.id !== "pf2e" || slots.length > 0);
   clearUseTargets();
+  const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
+    if (!sneakAttack) return null;
+    const control = modal.querySelector("[data-sneak-attack-control]");
+    if (!(control instanceof HTMLElement)) return null;
+    const wasChecked = control.querySelector("[name='useSneakAttack']")?.checked === true;
+    const assessment = assessSneakAttackApplicability(actor, item, activityId);
+    control.innerHTML = renderSneakAttackChoice(sneakAttack, assessment, wasChecked);
+    return assessment;
+  };
   const readUseOptions = (modal) => {
     const useSneakAttack = sneakAttack && modal.querySelector("[name='useSneakAttack']")?.checked === true;
     const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
@@ -4364,19 +4848,34 @@ function openUseDialog(itemId) {
       playerChoiceLabel: playerChoice?.label ?? "",
       castLevel: modal.querySelector("[name='castLevel']")?.value ?? defaultCastLevel ?? "",
       ammoItemId: modal.querySelector("[name='ammoItemId']")?.value ?? "",
-      sneakAttackFormula: useSneakAttack ? sneakAttack.formula : ""
+      sneakAttackFormula: useSneakAttack ? sneakAttack.formula : "",
+      replaceConcentrationEffectId: activeConcentration?.id ?? ""
     };
   };
   const refreshRollInstructions = (modal) => {
+    const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
+    refreshSneakAttackChoice(modal, activityId);
     const options = readUseOptions(modal);
     const currentInstructions = collectRollInstructions(item, actor, options);
     const wrap = modal.querySelector("[data-roll-instructions]");
     if (wrap) wrap.innerHTML = renderRollInstructions(currentInstructions, true);
+    const castButton = modal.querySelector("[data-modal-action='castSpell']");
+    if (castButton) castButton.textContent = hasFollowupRolls(currentInstructions)
+      ? "Use Spell & Continue to Rolls"
+      : "Use Spell";
+    const preview = modal.querySelector("[data-cast-preview]");
+    if (preview) preview.innerHTML = renderCastPreview(
+      currentInstructions,
+      options.castLevel,
+      adapter.id,
+      baseInstructionsFor(options.activityId),
+      baseCastLevel
+    );
     return { options, currentInstructions };
   };
   const finishUseFlow = async (modal, options, currentInstructions) => {
     await useItem(itemId, options, { showReminder: false });
-    if (!currentInstructions.some((entry) => entry.formula || entry.nativeAction)) {
+    if (!hasFollowupRolls(currentInstructions)) {
       closeModal();
       return;
     }
@@ -4417,7 +4916,7 @@ function openUseDialog(itemId) {
           ${slots.map((slot) => `<option value="${slot.level}">${escapeHtml(slot.label)}</option>`).join("")}
         </select>
       ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${adapter.id === "pf2e" && pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${adapter.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
-      <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, adapter.id)}</div>
+      <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, adapter.id, baseInstructionsFor(defaultActivityId), baseCastLevel)}</div>
       ${ammo.length ? `
         <label>Ammo</label>
         <select class="pp-select" name="ammoItemId">
@@ -4428,20 +4927,21 @@ function openUseDialog(itemId) {
     </div>
     <div class="pp-use-step ${activityStep || targetStep || spellStep ? "hidden" : ""}" data-use-step="rolls">
       ${concentration ? `<p><strong>${escapeHtml(concentration)}</strong></p>` : ""}
-      ${sneakAttack ? `
-        <label class="pp-sneak-attack-choice">
-          <input type="checkbox" name="useSneakAttack">
-          <span><i class="fas fa-user-ninja"></i> Add Sneak Attack</span>
-          <strong>${escapeHtml(sneakAttack.formula)}</strong>
-        </label>
-      ` : ""}
+      <div class="pp-rolls-required-heading">
+        <i class="fas fa-list-check"></i>
+        <div>
+          <strong>Rolls Still Required</strong>
+          <span>Complete each applicable attack, save, damage, healing, or system roll step below.</span>
+        </div>
+      </div>
+      ${sneakAttack ? `<div data-sneak-attack-control>${renderSneakAttackChoice(sneakAttack, assessSneakAttackApplicability(actor, item, defaultActivityId))}</div>` : ""}
       <div data-roll-instructions>${renderRollInstructions(instructions, true)}</div>
     </div>
     <div class="pp-dialog-actions">
       <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
       <button class="pp-button primary ${activityStep ? "" : "hidden"}" type="button" data-modal-action="nextActivityStep">Next</button>
       <button class="pp-button primary ${!activityStep && targetStep ? "" : "hidden"}" type="button" data-modal-action="nextTargetStep">Next</button>
-      <button class="pp-button primary ${!activityStep && !targetStep && spellStep ? "" : "hidden"}" type="button" data-modal-action="castSpell">Next</button>
+      <button class="pp-button primary ${!activityStep && !targetStep && spellStep ? "" : "hidden"}" type="button" data-modal-action="castSpell">${hasFollowupRolls(instructions) ? "Use Spell &amp; Continue to Rolls" : "Use Spell"}</button>
       <button class="pp-button primary ${activityStep || targetStep || spellStep ? "hidden" : ""}" type="button" data-modal-action="use">Next</button>
       <button class="pp-button primary hidden" type="button" data-modal-action="close" data-final-done>Done</button>
     </div>
@@ -4492,6 +4992,7 @@ function openUseDialog(itemId) {
       button.classList.toggle("primary", isSelected);
       button.textContent = isSelected ? "Targeted" : "Target";
       updateModalTargetCount(selected.size, targetInfo);
+      refreshSneakAttackChoice(_modal, _modal.querySelector("[name='activityId']")?.value ?? defaultActivityId);
       sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: Array.from(selected) });
     },
     nextTargetStep: async (modal) => {
@@ -4550,9 +5051,7 @@ function openUseDialog(itemId) {
         return;
       }
       if (!(target instanceof HTMLSelectElement) || target.name !== "castLevel") return;
-      const { options, currentInstructions } = refreshRollInstructions(modal);
-      const preview = modal.querySelector("[data-cast-preview]");
-      if (preview) preview.innerHTML = renderCastPreview(currentInstructions, options.castLevel, adapter.id);
+      refreshRollInstructions(modal);
     }
   });
 }
@@ -4575,6 +5074,123 @@ function getSneakAttackOption(actor) {
   return formula ? { itemId: feature.id, formula } : null;
 }
 
+function weaponSupportsSneakAttack(item, activityId = "") {
+  const selected = selectedItemActivity(item, activityId)?.activity ?? null;
+  const data = activitySystem(selected);
+  const attackType = fieldText(
+    data?.attack?.type?.value,
+    data?.attack?.type,
+    data?.actionType,
+    selected?.actionType,
+    item?.system?.actionType
+  ).toLowerCase();
+  const weaponType = String(item?.system?.type?.value ?? item?.system?.weaponType ?? "").toLowerCase();
+  const finesse = hasItemProperty(item, "fin") || hasItemProperty(item, "finesse");
+  const ranged = attackType.includes("ranged")
+    || ["rwak", "rsak"].includes(attackType)
+    || weaponType.endsWith("r")
+    || ["simple-ranged", "martial-ranged", "siege"].includes(weaponType);
+  return finesse || ranged;
+}
+
+function sceneTokenIsIncapacitated(token = {}) {
+  const statuses = new Set((token.statuses ?? []).map((value) => String(value).toLowerCase()));
+  return ["dead", "incapacitated", "paralyzed", "stunned", "unconscious"]
+    .some((condition) => Array.from(statuses).some((status) => status.includes(condition)));
+}
+
+function sneakAttackNearbyAlly(actor, target) {
+  const scene = state.scene;
+  const source = activeTokenForActor(actor?.id);
+  if (!scene || !source || !target) return null;
+  const sourceDisposition = Number(source.disposition ?? 0);
+  const targetDisposition = Number(target.disposition ?? 0);
+  const maxDistance = 5;
+  return (scene.tokens ?? []).find((token) => {
+    if (!token || token.id === source.id || token.id === target.id || token.actorId === actor?.id) return false;
+    if (sceneTokenIsIncapacitated(token)) return false;
+    const alliedWithSource = sourceDisposition !== 0
+      ? Number(token.disposition ?? 0) === sourceDisposition
+      : token.playerOwned === true;
+    const enemyOfTarget = targetDisposition !== 0
+      ? Number(token.disposition ?? 0) !== targetDisposition
+      : token.playerOwned !== target.playerOwned;
+    if (!alliedWithSource || !enemyOfTarget) return false;
+    const distance = tokenDistanceFeet(token, target);
+    return Number.isFinite(distance) && distance <= maxDistance + 0.01;
+  }) ?? null;
+}
+
+function assessSneakAttackApplicability(actor, item, activityId = "") {
+  if (!weaponSupportsSneakAttack(item, activityId)) {
+    return {
+      status: "ineligible",
+      reason: "This attack is not using a finesse or ranged weapon."
+    };
+  }
+  const selectedIds = selectedTargetSet(state.scene?.id ?? "");
+  const target = (state.scene?.tokens ?? []).find((token) => selectedIds.has(String(token.id)));
+  if (!target) {
+    return {
+      status: "uncertain",
+      reason: "Choose a target before confirming whether Sneak Attack applies."
+    };
+  }
+  const activity = selectedItemActivity(item, activityId)?.activity ?? null;
+  const attackMode = attackRollMode(actor, activity);
+  if (attackMode.rollMode === "disadvantage") {
+    return {
+      status: "ineligible",
+      reason: `The attack currently has disadvantage${attackMode.rollModeReason ? `: ${attackMode.rollModeReason}` : ""}.`
+    };
+  }
+  if (attackMode.rollMode === "advantage") {
+    return {
+      status: "applicable",
+      reason: `Advantage detected${attackMode.rollModeReason ? `: ${attackMode.rollModeReason}` : ""}.`
+    };
+  }
+  const ally = sneakAttackNearbyAlly(actor, target);
+  if (ally) {
+    return {
+      status: "applicable",
+      reason: `${ally.name ?? "An ally"} is within 5 feet of the target and is not incapacitated.`
+    };
+  }
+  return {
+    status: "not-detected",
+    reason: "No advantage or nearby ally was detected; another feature or table ruling may still allow it."
+  };
+}
+
+function renderSneakAttackChoice(option, assessment = {}, checked = false) {
+  const status = String(assessment.status ?? "uncertain");
+  const disabled = status === "ineligible";
+  const notDetected = status === "not-detected";
+  const title = status === "applicable"
+    ? "Apply Sneak Attack"
+    : (disabled
+      ? "Sneak Attack not applicable"
+      : (notDetected ? "Apply anyway only if another rule allows it" : "Apply Sneak Attack (if applicable)"));
+  const statusLabel = status === "applicable"
+    ? "Sneak Attack qualifier detected"
+    : (disabled
+      ? "Sneak Attack unavailable"
+      : (notDetected ? "No Sneak Attack qualifier detected" : "Sneak Attack not yet confirmed"));
+  const note = `${assessment.reason ?? "Confirm the Sneak Attack requirements."} Player Pilot cannot confirm whether Sneak Attack was already used this turn.`;
+  return `
+    <label class="pp-sneak-attack-choice ${escapeHtml(status)}">
+      <input type="checkbox" name="useSneakAttack" ${checked && !disabled ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <span class="pp-sneak-attack-copy">
+        <span class="pp-sneak-attack-status"><i class="fas ${status === "applicable" ? "fa-circle-check" : (disabled ? "fa-ban" : "fa-triangle-exclamation")}"></i> ${escapeHtml(statusLabel)}</span>
+        <strong><i class="fas fa-user-ninja"></i> ${escapeHtml(title)}</strong>
+        <small>${escapeHtml(note)}</small>
+      </span>
+      <b>${escapeHtml(option.formula)}</b>
+    </label>
+  `;
+}
+
 function scaleValueFormula(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string" || typeof value === "number") {
@@ -4594,13 +5210,69 @@ function scaleValueFormula(value) {
   return "";
 }
 
-function renderCastPreview(instructions = [], castLevel = "", adapterId = "") {
-  const scaled = instructions.filter((entry) => ["damage", "healing"].includes(entry.kind) && entry.formula);
+function formulaDiceCounts(formula = "") {
+  const counts = new Map();
+  for (const match of String(formula).matchAll(/(\d*)d(4|6|8|10|12|20)/gi)) {
+    const sides = Number(match[2]);
+    counts.set(sides, (counts.get(sides) ?? 0) + Number(match[1] || 1));
+  }
+  return counts;
+}
+
+function formulaIncrease(baseFormula = "", currentFormula = "") {
+  const base = formulaDiceCounts(baseFormula);
+  const current = formulaDiceCounts(currentFormula);
+  const increases = [];
+  for (const [sides, count] of current.entries()) {
+    const increase = count - Number(base.get(sides) ?? 0);
+    if (increase > 0) increases.push(`+${increase}d${sides}`);
+  }
+  return increases.join(" + ");
+}
+
+function previewInstructionKey(entry = {}) {
+  return `${String(entry.kind ?? "")}:${String(entry.label ?? "").toLowerCase().replace(/\s+roll$/i, "").trim()}`;
+}
+
+function previewEffectLabel(entry = {}) {
+  const label = String(entry.label ?? "").replace(/\s+roll$/i, "").trim();
+  if (entry.kind === "healing") return label && !/^healing$/i.test(label) ? label : "Healing";
+  return label && !/^damage$/i.test(label) ? label : "Damage";
+}
+
+function renderCastPreview(instructions = [], castLevel = "", adapterId = "", baseInstructions = [], baseCastLevel = "") {
+  const effects = instructions.filter((entry) => ["damage", "healing"].includes(entry.kind) && entry.formula);
   const rankOrLevel = adapterId === "pf2e" ? "Rank" : "Spell Level";
-  if (!scaled.length) return `<p>This spell can use the selected ${adapterId === "pf2e" ? "rank" : "slot level"}. Its listed roll does not change.</p>`;
+  const baseByKey = new Map(baseInstructions.map((entry) => [previewInstructionKey(entry), entry]));
+  const selectedLevel = Number(castLevel ?? 0);
+  const originalLevel = Number(baseCastLevel ?? 0);
+  const isUpcast = selectedLevel > originalLevel;
+  const levelDisplay = selectedLevel > 0 ? selectedLevel : "Cantrip";
+  const rows = effects.map((entry) => {
+    const base = baseByKey.get(previewInstructionKey(entry));
+    const increase = formulaIncrease(base?.formula, entry.formula);
+    const effect = previewEffectLabel(entry);
+    const changeText = increase
+      ? `${increase} from ${rankOrLevel} ${selectedLevel}`
+      : (isUpcast ? `No additional dice shown at ${rankOrLevel} ${selectedLevel}` : "Base spell effect");
+    return `
+      <div class="pp-upcast-effect">
+        <span>${entry.kind === "healing" ? "Healing effect" : "Damage on hit"}</span>
+        <strong>${escapeHtml(entry.formula)} <em>${escapeHtml(effect.toLowerCase())}</em></strong>
+        <small class="${increase ? "increased" : ""}">${escapeHtml(changeText)}</small>
+      </div>
+    `;
+  }).join("");
   return `
-    <div class="pp-cast-preview-title">Cast at ${rankOrLevel} ${escapeHtml(castLevel || "-")}</div>
-    ${scaled.map((entry) => `<div><strong>${escapeHtml(entry.label)}</strong><span>${escapeHtml(entry.formula)}</span>${renderDiceFormulaIcons(entry.formula)}</div>`).join("")}
+    <div class="pp-upcast-preview-heading">
+      <i class="fas fa-arrow-trend-up"></i>
+      <div>
+        <strong>Upcast Preview</strong>
+        <span>Preview only - required attack, save, damage, or healing steps come after you continue.</span>
+      </div>
+    </div>
+    <div class="pp-cast-preview-title">Spell effect at ${selectedLevel > 0 ? `${rankOrLevel} ${escapeHtml(levelDisplay)}` : escapeHtml(levelDisplay)}</div>
+    ${rows || `<p>This spell can use the selected ${adapterId === "pf2e" ? "rank" : "slot level"}, but its listed damage or healing does not change.</p>`}
   `;
 }
 
@@ -4608,6 +5280,7 @@ function targetInstructionText(targetInfo = {}) {
   const count = Number(targetInfo.count ?? 0);
   if (Number.isFinite(count) && count > 1) return `Choose up to ${count} targets.`;
   if (Number.isFinite(count) && count === 1) return "Choose one target.";
+  if (targetInfo.limitReason) return `Choose targets for this action. ${targetInfo.limitReason} Verify the final limit after choosing the cast level.`;
   return "Choose targets for this action.";
 }
 
@@ -4647,7 +5320,10 @@ function renderModalTargetRow(token, selected, item) {
       <div class="pp-card-img" style="background-image:url('${escapeHtml(token.img)}')"></div>
       <div class="pp-card-main">
         <div class="pp-card-title"><span>${escapeHtml(token.name)}</span></div>
-        <div class="pp-card-meta">${range ? `<span class="pp-badge ${range.out ? "danger" : "good"}">${escapeHtml(range.text)}</span>` : ""}</div>
+        <div class="pp-card-meta">
+          ${range ? `<span class="pp-badge ${range.out ? "danger" : "good"}">${escapeHtml(range.text)}</span>` : ""}
+          ${renderTargetStateBadges(token)}
+        </div>
       </div>
       <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" data-modal-action="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
     </article>
@@ -4723,8 +5399,8 @@ function collectPf2eRollInstructions(item, actor, options = {}) {
       const adjustedModifier = Number(modifier) - mapPenalty;
       nativeChoices.push({
         label: attackNumber === 1
-          ? `Attack${Number.isFinite(adjustedModifier) ? ` ${signedMod(adjustedModifier)}` : ""}`
-          : `MAP -${mapPenalty}${Number.isFinite(adjustedModifier) ? ` (${signedMod(adjustedModifier)})` : ""}`,
+          ? (Number.isFinite(adjustedModifier) ? signedMod(adjustedModifier) : "Attack")
+          : (Number.isFinite(adjustedModifier) ? `${signedMod(adjustedModifier)} (MAP -${mapPenalty})` : `MAP -${mapPenalty}`),
         formula: Number.isFinite(Number(modifier)) ? d20Formula(Number(modifier) - mapPenalty) : "",
         nativeAction: "spellAttack",
         attackNumber
@@ -4786,15 +5462,18 @@ function collectPf2eRollInstructions(item, actor, options = {}) {
 }
 
 function collectRollInstructions(item, actor, options = {}) {
-  if (String(game.system?.id ?? "").toLowerCase() === "pf2e") return collectPf2eRollInstructions(item, actor, options);
+  const systemId = currentSystemId();
+  if (systemId === "pf2e") return collectPf2eRollInstructions(item, actor, options);
+  const isDnd5e = systemId === "dnd5e";
   const entries = [];
   const system = item?.system ?? {};
   const labels = item?.labels ?? {};
   const chosenActivity = options.activityId ? selectedItemActivity(item, options.activityId)?.activity : null;
-  const chosenAttackMode = chosenActivity ? attackRollMode(actor, chosenActivity) : {};
+  const chosenAttackMode = isDnd5e && chosenActivity ? attackRollMode(actor, chosenActivity) : {};
   const push = (entry) => {
+    const effectKind = rollEffectKind(entry.kind, entry.label, entry.effectType, entry.activity);
     const next = {
-      kind: String(entry.kind ?? "roll"),
+      kind: effectKind,
       label: cleanRulesText(entry.label ?? "Roll"),
       formula: cleanRulesText(resolveDisplayFormula(entry.formula ?? "", actor, item, entry.activity)),
       detail: cleanRulesText(entry.detail ?? ""),
@@ -4815,17 +5494,32 @@ function collectRollInstructions(item, actor, options = {}) {
     if (!entries.some((existing) => `${existing.label}|${existing.formula}|${existing.detail}` === key)) entries.push(next);
   };
   if (labels.toHit) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${labels.toHit}`, activity: chosenActivity, ...chosenAttackMode });
-  if (labels.damage) push({ kind: "damage", label: "Damage Roll", formula: labels.damage });
-  if (labels.healing) push({ kind: "healing", label: "Healing Roll", formula: labels.healing });
+  if (labels.damage) push({
+    kind: "damage",
+    label: "Damage Roll",
+    formula: fieldText(labels.damage?.formula, labels.damage),
+    effectType: damageTypeLabel(labels.damage),
+    activity: chosenActivity
+  });
+  if (labels.healing) push({ kind: "healing", label: "Healing Roll", formula: fieldText(labels.healing?.formula, labels.healing), activity: chosenActivity });
   if (Array.isArray(labels.damages)) {
-    labels.damages.forEach((damage) => push({ kind: "damage", label: `${damageTypeLabel(damage) || "Damage"} Roll`, formula: damage?.formula ?? "" }));
+    labels.damages.forEach((damage) => {
+      const type = damageTypeLabel(damage);
+      push({
+        kind: "damage",
+        label: `${type || "Damage"} Roll`,
+        formula: damage?.formula ?? "",
+        effectType: type,
+        activity: chosenActivity
+      });
+    });
   }
   const systemDamage = system.damage ?? {};
   const systemDamageParts = Array.isArray(systemDamage.parts) ? systemDamage.parts : Object.values(systemDamage.parts ?? {});
   systemDamageParts.forEach((part) => {
     const formula = Array.isArray(part) ? part[0] : fieldText(part?.formula);
     const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
-    push({ kind: "damage", label: `${capitalizeWords(type) || "Damage"} Roll`, formula });
+    push({ kind: "damage", label: `${capitalizeWords(type) || "Damage"} Roll`, formula, effectType: type, activity: chosenActivity });
   });
   if (system.attackBonus) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${signedMod(system.attackBonus)}`, activity: chosenActivity, ...chosenAttackMode });
   const saveDc = readSaveDc(system.save?.dc ?? system.activities?.save?.dc ?? actor?.system?.attributes?.spelldc);
@@ -4837,7 +5531,7 @@ function collectRollInstructions(item, actor, options = {}) {
   for (const activity of instructionActivities) {
     const activityData = activitySystem(activity);
     const attack = activityData?.attack ?? {};
-    const attackMode = attackRollMode(actor, activity);
+    const attackMode = isDnd5e ? attackRollMode(actor, activity) : {};
     if (attack?.bonus || attack?.toHit) push({
       kind: "attack",
       label: "Attack Roll",
@@ -4854,7 +5548,7 @@ function collectRollInstructions(item, actor, options = {}) {
           part?.formula,
           Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
         );
-      const scaledFormula = scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel);
+      const scaledFormula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel) : rawFormula;
       const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
       push({
         kind: "damage",
@@ -4862,15 +5556,45 @@ function collectRollInstructions(item, actor, options = {}) {
         formula: scaledFormula,
         detail: scaledFormula !== rawFormula ? `Cast at Spell Level ${options.castLevel}` : "",
         scaled: scaledFormula !== rawFormula,
+        effectType: type,
         activity
       });
     });
     const healing = activityData?.healing ?? {};
     const healingParts = Array.isArray(healing.parts) ? healing.parts : [];
-    if (healing.formula) push({ kind: "healing", label: "Healing Roll", formula: healing.formula });
+    const rawHealingFormula = fieldText(
+      healing.formula,
+      Number(healing.number) > 0 && Number(healing.denomination) > 0
+        ? `${healing.number}d${healing.denomination}${healing.bonus ? ` + ${healing.bonus}` : ""}`
+        : ""
+    );
+    const scaledHealingFormula = isDnd5e
+      ? scaleSpellPartFormula(rawHealingFormula, healing.scaling, item, options.castLevel)
+      : rawHealingFormula;
+    if (scaledHealingFormula) push({
+      kind: "healing",
+      label: "Healing Roll",
+      formula: scaledHealingFormula,
+      detail: scaledHealingFormula !== rawHealingFormula ? `Cast at Spell Level ${options.castLevel}` : "",
+      scaled: scaledHealingFormula !== rawHealingFormula,
+      activity
+    });
     healingParts.forEach((part) => {
-      const formula = Array.isArray(part) ? part[0] : part?.formula ?? "";
-      push({ kind: "healing", label: "Healing Roll", formula });
+      const rawFormula = Array.isArray(part)
+        ? part[0]
+        : fieldText(
+          part?.formula,
+          Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
+        );
+      const formula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel) : rawFormula;
+      push({
+        kind: "healing",
+        label: "Healing Roll",
+        formula,
+        detail: formula !== rawFormula ? `Cast at Spell Level ${options.castLevel}` : "",
+        scaled: formula !== rawFormula,
+        activity
+      });
     });
     const save = activityData?.save ?? {};
     const activityDc = readSaveDc(save?.dc?.value ?? save?.dc);
@@ -4888,7 +5612,7 @@ function collectRollInstructions(item, actor, options = {}) {
       detail: "Apply this extra damage if the Sneak Attack requirements are met."
     });
   }
-  applyCastLevelScaling(entries, item, options.castLevel);
+  if (isDnd5e) applyCastLevelScaling(entries, item, options.castLevel);
   if (itemRequiresConcentration(item)) push({ kind: "note", label: "Concentration", detail: "This can require concentration after casting." });
   return pruneRollInstructions(entries).slice(0, 10);
 }
@@ -5101,11 +5825,14 @@ function applyCastLevelScaling(entries, item, castLevel) {
 
 function scaleSpellPartFormula(formula, scaling, item, castLevel) {
   const base = String(formula ?? "").trim();
-  if (!base || item?.type !== "spell" || !scaling || String(scaling.mode ?? "").toLowerCase() === "none") return base;
+  const scalingMode = String(scaling?.mode ?? "").toLowerCase();
+  if (!base || item?.type !== "spell" || !scaling || !["whole", "half"].includes(scalingMode)) return base;
   const baseLevel = Number(item.system?.level ?? item.system?.rank ?? 0);
   const level = Number(castLevel ?? baseLevel);
-  const steps = level - baseLevel;
-  if (!Number.isFinite(steps) || steps <= 0) return base;
+  const levelSteps = level - baseLevel;
+  if (!Number.isFinite(levelSteps) || levelSteps <= 0) return base;
+  const steps = scalingMode === "half" ? Math.floor(levelSteps * 0.5) : levelSteps;
+  if (steps <= 0) return base;
   const diceMatch = base.match(/^(\d+)\s*d\s*(\d+)(.*)$/i);
   const scalingNumber = Number(scaling.number ?? 0);
   if (diceMatch && Number.isFinite(scalingNumber) && scalingNumber > 0) {
@@ -5155,7 +5882,7 @@ function openRollChoiceDialog(data = {}) {
   openModal(`
     <h2>${escapeHtml(name)}</h2>
     <div class="pp-roll-choice-hero">
-      <i class="fas fa-dice-d20"></i>
+      ${renderDieGlyph(20)}
       <strong>${escapeHtml(describeFormula(formula))}</strong>
       <span>${escapeHtml(formula)}</span>
     </div>
@@ -5206,7 +5933,7 @@ function renderRollInstructions(instructions = [], allowManual = true) {
   return `
     <div class="pp-roll-instructions">
       ${instructions.map((entry) => `
-        <article class="pp-roll-instruction pp-roll-choice-hero">
+        <article class="pp-roll-instruction pp-roll-choice-hero pp-roll-kind-${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}">
           <img class="pp-instruction-icon" src="${escapeHtml(rollInstructionIcon(entry))}" alt="">
           <div class="pp-roll-instruction-copy">
             <strong>${escapeHtml(entry.label)}</strong>
@@ -5219,9 +5946,9 @@ function renderRollInstructions(instructions = [], allowManual = true) {
             <div class="pp-roll-instruction-actions ${Array.isArray(entry.nativeChoices) && entry.nativeChoices.length ? "pp-native-choice-actions" : ""}">
               ${Array.isArray(entry.nativeChoices) && entry.nativeChoices.length
                 ? entry.nativeChoices.map((choice) => `
-                  <button class="pp-button ${Number(choice.attackNumber ?? 1) === 1 ? "primary" : ""}" type="button" data-modal-action="nativeInstruction" data-native-action="${escapeHtml(choice.nativeAction ?? entry.nativeAction)}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(choice.attackNumber ?? "")}" title="${escapeHtml(choice.formula ?? choice.label)}">${escapeHtml(choice.label)}</button>
+                  <button class="pp-button ${choice.primary === true || Number(choice.attackNumber ?? 0) === 1 ? "primary" : ""}" type="button" data-modal-action="${escapeHtml(choice.modalAction ?? entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(choice.nativeAction ?? entry.nativeAction)}" data-operation="${escapeHtml(choice.operation ?? entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(choice.attackNumber ?? "")}" data-variant-index="${escapeHtml(choice.variantIndex ?? entry.variantIndex ?? "")}" title="${escapeHtml(choice.formula ?? choice.label)}">${escapeHtml(choice.buttonLabel ?? choice.label)}</button>
                 `).join("")
-                : `<button class="pp-button primary" type="button" data-modal-action="nativeInstruction" data-native-action="${escapeHtml(entry.nativeAction)}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(entry.attackNumber ?? "")}">Roll ${escapeHtml(entry.kind === "damage" ? "Damage" : entry.kind === "healing" ? "Healing" : "")}</button>`}
+                : `<button class="pp-button primary" type="button" data-modal-action="${escapeHtml(entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(entry.nativeAction)}" data-operation="${escapeHtml(entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(entry.attackNumber ?? "")}" data-variant-index="${escapeHtml(entry.variantIndex ?? "")}">${escapeHtml(entry.buttonLabel ?? `Roll ${entry.kind === "damage" ? "Damage" : entry.kind === "healing" ? "Healing" : ""}`)}</button>`}
             </div>
           ` : (allowManual && entry.formula ? `
             <div class="pp-roll-instruction-actions">
@@ -5237,29 +5964,63 @@ function renderRollInstructions(instructions = [], allowManual = true) {
 function renderDiceFormulaIcons(formula) {
   const dice = Array.from(String(formula ?? "").matchAll(/(\d*)d(4|6|8|10|12|20)/gi));
   if (!dice.length) return "";
+  const modifier = formulaFlatModifier(formula);
   return `
     <div class="pp-formula-dice" aria-label="${escapeHtml(formula)}">
       ${dice.map((match) => {
         const count = Math.min(12, Math.max(1, Number(match[1] || 1)));
         const sides = match[2];
-        return `<span>${Array.from({ length: count }).map(() => `<img src="${escapeHtml(`${DND_ICON_ROOT}/dice/d${sides}.svg`)}" alt="d${escapeHtml(sides)}">`).join("")}</span>`;
+        return `<span>${Array.from({ length: count }).map(() => renderDieGlyph(sides)).join("")}</span>`;
       }).join("")}
+      ${modifier ? `<strong class="pp-formula-modifier">${escapeHtml(signedMod(modifier))}</strong>` : ""}
     </div>
   `;
+}
+
+function rollEffectKind(kind = "roll", label = "", effectType = "", activity = null) {
+  const requested = String(kind || "roll").toLowerCase();
+  if (!["damage", "healing"].includes(requested)) return requested;
+  const activityType = String(activitySystem(activity)?.type ?? activity?.type ?? "").toLowerCase();
+  const healingSignal = `${fieldText(effectType)} ${fieldText(label)} ${activityType}`.toLowerCase();
+  return /\b(?:heal|healing)\b/.test(healingSignal) ? "healing" : requested;
+}
+
+function formulaFlatModifier(formula = "") {
+  let total = 0;
+  for (const match of String(formula).matchAll(/([+-])\s*(\d+(?:\.\d+)?)(?!\s*[dD*\/])/g)) {
+    const value = Number(match[2]);
+    if (!Number.isFinite(value)) continue;
+    total += match[1] === "-" ? -value : value;
+  }
+  return total;
 }
 
 function rollInstructionIcon(entry = {}) {
   const kind = String(entry.kind ?? "").toLowerCase();
   const label = String(entry.label ?? "").toLowerCase();
-  if (kind === "attack") return `${DND_ICON_ROOT}/activity/attack.svg`;
-  if (kind === "save") return `${DND_ICON_ROOT}/activity/save.svg`;
-  if (kind === "healing") return `${DND_ICON_ROOT}/damage/healing.svg`;
+  if (kind === "attack") return `${CORE_ICON_ROOT}/sword.svg`;
+  if (kind === "save") return `${CORE_ICON_ROOT}/shield.svg`;
+  if (kind === "healing") return `${CORE_ICON_ROOT}/heal.svg`;
   if (kind === "damage") {
-    const damageTypes = ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"];
-    const type = damageTypes.find((candidate) => label.includes(candidate));
-    return `${DND_ICON_ROOT}/damage/${type || "all"}.svg`;
+    const coreDamageIcons = {
+      acid: "acid.svg",
+      bludgeoning: "thrust.svg",
+      cold: "frozen.svg",
+      fire: "fire.svg",
+      force: "explosion.svg",
+      lightning: "lightning.svg",
+      necrotic: "degen.svg",
+      piercing: "thrust.svg",
+      poison: "poison.svg",
+      psychic: "daze.svg",
+      radiant: "sun.svg",
+      slashing: "sword.svg",
+      thunder: "sound.svg"
+    };
+    const type = Object.keys(coreDamageIcons).find((candidate) => label.includes(candidate));
+    return `${CORE_ICON_ROOT}/${coreDamageIcons[type] ?? "explosion.svg"}`;
   }
-  return `${DND_ICON_ROOT}/activity/utility.svg`;
+  return `${CORE_ICON_ROOT}/dice-target.svg`;
 }
 
 async function autoRollInstruction(item, data = {}) {
@@ -5359,6 +6120,14 @@ function actorHasActiveTurn(actor) {
   return getActorTokenCandidates(actor.id).some((token) => token.id === activeTokenId);
 }
 
+function findPf2eStrikeModel(actor, data = {}) {
+  return PF2E_ADAPTER.groups(actor).actions.find((item) => {
+    if (!item.pf2eStrike) return false;
+    return String(item.pf2eStrike.itemId) === String(data.itemId ?? "")
+      && (!data.strikeSlug || String(item.pf2eStrike.slug) === String(data.strikeSlug));
+  }) ?? null;
+}
+
 async function runPf2eStrike(data = {}) {
   if (pilotPaused()) {
     warnPaused();
@@ -5367,15 +6136,16 @@ async function runPf2eStrike(data = {}) {
   const actor = currentActor();
   if (!actor || systemAdapter(actor).id !== "pf2e") return;
   const operation = String(data.operation ?? "attack");
+  if (operation === "flow") {
+    const strikeModel = findPf2eStrikeModel(actor, data);
+    if (strikeModel) await openPf2eStrikeFlowDialog(strikeModel, data);
+    return;
+  }
   const currentTargets = selectedTargetSet(state.scene?.id ?? "");
   if (operation === "attack" && !currentTargets.size && data.skipTargetPrompt !== true && data.skipTargetPrompt !== "true") {
-    const strikeModel = PF2E_ADAPTER.groups(actor).actions.find((item) => {
-      if (!item.pf2eStrike) return false;
-      return String(item.pf2eStrike.itemId) === String(data.itemId ?? "")
-        && (!data.strikeSlug || String(item.pf2eStrike.slug) === String(data.strikeSlug));
-    });
+    const strikeModel = findPf2eStrikeModel(actor, data);
     if (strikeModel && displayedTargetTokens(state.scene).some((token) => token.actorId !== actor.id)) {
-      openPf2eStrikeTargetDialog(strikeModel, data);
+      await openPf2eStrikeFlowDialog(strikeModel, data);
       return;
     }
   }
@@ -5400,6 +6170,164 @@ async function runPf2eStrike(data = {}) {
     "pf2eStrike",
     payload
   );
+}
+
+async function pf2eStrikeDamageFormula(actor, strikeModel, operation = "damage") {
+  const strike = pf2eFindStrike(actor, {
+    itemId: strikeModel?.pf2eStrike?.itemId,
+    strikeSlug: strikeModel?.pf2eStrike?.slug,
+    strikeIndex: strikeModel?.pf2eStrike?.index
+  });
+  const rollFn = operation === "critical" ? strike?.critical : strike?.damage;
+  if (typeof rollFn === "function") {
+    try {
+      const formula = await rollFn({ getFormula: true });
+      if (formula) return cleanRulesText(formula);
+    } catch (err) {
+      console.warn(`Player Pilot could not preview PF2e strike ${operation} formula.`, err);
+    }
+  }
+  const item = strike?.item ?? findItem(strikeModel?.pf2eStrike?.itemId);
+  const damage = item?.system?.damage ?? {};
+  const dice = Number(damage.dice ?? 0);
+  const die = String(damage.die ?? "").trim();
+  const modifier = Number(damage.modifier ?? 0);
+  if (dice > 0 && /^d\d+$/i.test(die)) {
+    const base = `${dice}${die}`;
+    const formula = modifier ? `${base} ${signedMod(modifier)}` : base;
+    return operation === "critical" ? `2 * (${formula})` : formula;
+  }
+  return "";
+}
+
+async function renderPf2eStrikeRollInstructions(strikeModel, strikeData = {}) {
+  const actor = currentActor();
+  const strike = strikeModel?.pf2eStrike ?? {};
+  const variants = strike.variants?.length ? strike.variants : [{ index: 0, label: "Attack", modifier: NaN }];
+  const firstModifier = Number(variants[0]?.modifier);
+  const damageFormula = strike.hasDamage && actor ? await pf2eStrikeDamageFormula(actor, strikeModel, "damage") : "";
+  const criticalFormula = strike.hasCritical && actor ? await pf2eStrikeDamageFormula(actor, strikeModel, "critical") : "";
+  const instructions = [{
+    kind: "attack",
+    label: "Attack Roll",
+    formula: Number.isFinite(firstModifier) ? d20Formula(firstModifier) : "",
+    detail: "Choose the attack that matches your current multiple attack penalty.",
+    nativeAction: "pf2eStrike",
+    modalAction: "rollPf2eStrike",
+    operation: "attack",
+    nativeChoices: variants.map((variant, idx) => {
+      const modifier = Number(variant.modifier);
+      const label = variant.label || (idx === 0 ? "Attack" : `MAP ${idx + 1}`);
+      return {
+        label: Number.isFinite(modifier) ? `${label} ${signedMod(modifier)}` : label,
+        buttonLabel: Number.isFinite(modifier) ? `${label} ${signedMod(modifier)}` : label,
+        formula: Number.isFinite(modifier) ? d20Formula(modifier) : label,
+        modalAction: "rollPf2eStrike",
+        operation: "attack",
+        variantIndex: Number(variant.index ?? idx),
+        primary: idx === 0
+      };
+    })
+  }];
+  if (strike.hasDamage) instructions.push({
+    kind: "damage",
+    label: "Damage",
+    formula: damageFormula,
+    detail: damageFormula ? "Normal strike damage after a hit." : "PF2e will calculate weapon, rune, trait, and effect damage when rolled.",
+    nativeAction: "pf2eStrike",
+    modalAction: "rollPf2eStrike",
+    operation: "damage",
+    variantIndex: Number(strikeData.variantIndex ?? 0),
+    buttonLabel: "Roll Damage"
+  });
+  if (strike.hasCritical) instructions.push({
+    kind: "damage",
+    label: "Critical Damage",
+    formula: criticalFormula,
+    detail: criticalFormula ? "Critical strike damage." : "PF2e will calculate critical damage when rolled.",
+    nativeAction: "pf2eStrike",
+    modalAction: "rollPf2eStrike",
+    operation: "critical",
+    variantIndex: Number(strikeData.variantIndex ?? 0),
+    buttonLabel: "Roll Critical"
+  });
+  return renderRollInstructions(instructions, true);
+}
+
+async function openPf2eStrikeFlowDialog(strikeModel, strikeData) {
+  const targetInfo = strikeModel.targetInfo;
+  clearUseTargets();
+  const canPickTargets = displayedTargetTokens(state.scene).some((token) => targetInfo.allowSelf || token.actorId !== state.actorId);
+  const targetStep = targetInfo.needsTarget && canPickTargets;
+  const rollInstructions = await renderPf2eStrikeRollInstructions(strikeModel, strikeData);
+  openModal(`
+    <h2>Strike with ${escapeHtml(strikeModel.name)}</h2>
+    <div class="pp-use-step ${targetStep ? "" : "hidden"}" data-use-step="targets">
+      <p data-modal-target-summary>${escapeHtml(targetInstructionText(targetInfo))}</p>
+      <div data-modal-target-picker>${renderModalTargetPicker(strikeModel)}</div>
+    </div>
+    <div class="pp-use-step ${targetStep ? "hidden" : ""}" data-use-step="rolls">
+      <div class="pp-rolls-required-heading">
+        <i class="fas fa-list-check"></i>
+        <div>
+          <strong>Rolls Still Required</strong>
+          <span>Choose the MAP attack that applies, then roll damage or critical damage after the result.</span>
+        </div>
+      </div>
+      ${rollInstructions}
+    </div>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+      <button class="pp-button primary ${targetStep ? "" : "hidden"}" type="button" data-modal-action="nextTargetStep">Next</button>
+      <button class="pp-button primary ${targetStep ? "hidden" : ""}" type="button" data-modal-action="close" data-final-done>Done</button>
+    </div>
+  `, {
+    modalToggleTarget: async (_modal, button) => {
+      if (button?.disabled || button?.dataset?.disabled === "true") return;
+      const tokenId = button?.dataset?.tokenId ?? "";
+      const sceneId = state.scene?.id ?? "";
+      const selected = selectedTargetSet(sceneId);
+      if (selected.has(tokenId)) selected.delete(tokenId);
+      else {
+        const limit = Number(targetInfo.count ?? 0);
+        if (Number.isFinite(limit) && limit > 0 && selected.size >= limit) {
+          ui.notifications?.warn?.(`Select up to ${limit} target${limit === 1 ? "" : "s"}.`);
+          return;
+        }
+        selected.add(tokenId);
+      }
+      setSelectedTargetSet(sceneId, selected);
+      applyTargetsForCurrentUser(Array.from(selected), sceneId);
+      state.modal?.querySelectorAll?.(".pp-token-row").forEach((row) => {
+        const rowButton = row.querySelector?.("[data-token-id]");
+        const active = rowButton && selected.has(rowButton.dataset.tokenId);
+        row.classList?.toggle?.("selected", active);
+        rowButton?.classList?.toggle?.("primary", active);
+        if (rowButton) rowButton.textContent = active ? "Targeted" : "Target";
+      });
+      updateModalTargetCount(selected.size, targetInfo);
+      sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: Array.from(selected) });
+    },
+    nextTargetStep: async (modal) => {
+      if (!selectedTargetSet(state.scene?.id ?? "").size) {
+        ui.notifications?.warn?.("Choose a target first.");
+        return;
+      }
+      modal.querySelector("[data-use-step='targets']")?.classList?.add?.("hidden");
+      modal.querySelector("[data-use-step='rolls']")?.classList?.remove?.("hidden");
+      modal.querySelector("[data-modal-action='nextTargetStep']")?.classList?.add?.("hidden");
+      modal.querySelector("[data-final-done]")?.classList?.remove?.("hidden");
+    },
+    rollPf2eStrike: async (_modal, button) => {
+      const operation = String(button?.dataset?.operation ?? "attack");
+      await runPf2eStrike({
+        ...strikeData,
+        operation,
+        variantIndex: Number(button?.dataset?.variantIndex ?? strikeData.variantIndex ?? 0),
+        skipTargetPrompt: true
+      });
+    }
+  });
 }
 
 function openPf2eStrikeTargetDialog(strikeModel, strikeData) {
@@ -5567,7 +6495,7 @@ function openManualRollDialog(data = {}) {
   openModal(`
     <h2>${escapeHtml(name)}</h2>
     <div class="pp-roll-choice-hero">
-      <i class="fas fa-dice-d20"></i>
+      ${renderDieGlyph(20)}
       <strong>${escapeHtml(totalMode ? "Enter the final total." : describeFormula(formula))}</strong>
       <span>${escapeHtml(formula)}</span>
     </div>
@@ -6050,7 +6978,7 @@ function requestSceneState(force = false) {
 function sceneStateFingerprint(scene) {
   if (!scene) return "";
   const tokens = (scene.tokens ?? [])
-    .map((token) => `${token.id}:${token.actorId}:${Math.round(Number(token.x ?? 0))},${Math.round(Number(token.y ?? 0))}:${token.disposition}:${token.owned ? 1 : 0}:${token.playerOwned ? 1 : 0}:${(token.statuses ?? []).join(",")}`)
+    .map((token) => `${token.id}:${token.actorId}:${Math.round(Number(token.x ?? 0))},${Math.round(Number(token.y ?? 0))}:${token.disposition}:${token.owned ? 1 : 0}:${token.playerOwned ? 1 : 0}:${(token.statuses ?? []).join(",")}:${(token.effects ?? []).map((effect) => `${effect.id ?? ""}:${effect.img ?? ""}`).join(",")}`)
     .join("|");
   return [
     scene.id ?? "",
@@ -6497,6 +7425,7 @@ async function handleSocket(data) {
   if (targets && !targets.includes(game.user?.id)) return;
 
   if (data.type === "settingsChanged") {
+    applySharedDocumentPopupMode();
     if (userIsPilot()) mountPilotShell();
     else unmountPilotShell();
     return;
@@ -6554,7 +7483,8 @@ async function handlePlayerSocket(data) {
     return;
   }
   if (data.type === "journalImage") {
-    showSharedImage(data.src, Number(data.duration ?? setting("journalImageSeconds", 20)));
+    if (sharedDocumentPopupsEnabled()) showSharedImage(data.src, Number(data.duration ?? 20));
+    return;
   }
 }
 
@@ -6720,6 +7650,100 @@ async function withProxyTargetsForUser(userId, fn) {
   }
 }
 
+function actionNoticeIcon(item) {
+  return ({
+    spell: "fa-wand-magic-sparkles",
+    weapon: "fa-sword",
+    feat: "fa-star",
+    consumable: "fa-flask",
+    equipment: "fa-shield-halved",
+    tool: "fa-hammer"
+  })[String(item?.type ?? "").toLowerCase()] ?? "fa-bolt";
+}
+
+function actionNoticeType(item) {
+  return ({
+    spell: "Spell",
+    weapon: "Weapon",
+    feat: "Feature",
+    consumable: "Item",
+    equipment: "Item",
+    tool: "Tool"
+  })[String(item?.type ?? "").toLowerCase()] ?? capitalizeWords(item?.type || "Action");
+}
+
+function actionNoticeActivation(item, activityId = "") {
+  const selected = activityId ? selectedItemActivity(item, activityId)?.activity : null;
+  const activity = activitySystem(selected);
+  return fieldText(
+    formatActionTime(activity?.activation ?? selected?.activation ?? {}),
+    formatActionTime(item?.system?.activation ?? {}),
+    unitLabel(activity?.actionType),
+    unitLabel(item?.system?.actionType)
+  );
+}
+
+function actionNoticeTargets(data, item, actor) {
+  const scene = getSceneDoc(data.sceneId);
+  const targetIds = Array.isArray(data.targetIds) ? data.targetIds : [];
+  const names = targetIds
+    .map((id) => scene?.tokens?.get?.(id) ?? asArray(scene?.tokens).find((token) => String(token.id) === String(id)))
+    .map((token) => fieldText(token?.name, token?.actor?.name))
+    .filter(Boolean);
+  if (names.length) return names;
+  if (targetIds.length) return [`${targetIds.length} target${targetIds.length === 1 ? "" : "s"}`];
+  const targetInfo = itemTargetInfo(item, data.options?.activityId);
+  if (targetInfo.selfOnly) return [`${actor.name} (Self)`];
+  return targetInfo.text ? [targetInfo.text] : [];
+}
+
+function compactTargetText(targets, limit = 2) {
+  if (!targets.length) return "No target";
+  if (targets.length <= limit) return targets.join(", ");
+  return `${targets.slice(0, limit).join(", ")} +${targets.length - limit}`;
+}
+
+function renderGmActionNotice({ requester, actor, item, data }) {
+  const activityName = String(data.options?.activityName ?? "").trim();
+  const activation = actionNoticeActivation(item, data.options?.activityId);
+  const isSpell = item.type === "spell";
+  const adapterId = systemAdapter(actor).id;
+  const selectedLevel = Number(data.options?.castLevel ?? 0);
+  const baseLevel = adapterId === "pf2e" ? Number(pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
+  const castLevel = selectedLevel > 0 ? selectedLevel : baseLevel;
+  const isCantrip = adapterId === "pf2e" ? pf2eIsCantrip(item) : baseLevel <= 0;
+  const levelText = isSpell ? (isCantrip ? "Cantrip" : String(castLevel)) : "";
+  const levelLabel = adapterId === "pf2e" ? "Rank" : "Level";
+  const targets = actionNoticeTargets(data, item, actor);
+  const targetText = compactTargetText(targets, 4);
+  const playerChoice = String(data.options?.playerChoice ?? "").trim();
+  const playerChoiceLabel = String(data.options?.playerChoiceLabel ?? "Choice").trim();
+  const actionDetail = [activityName, activation].filter(Boolean).join(" / ");
+  const detailPills = [
+    levelText ? `<span class="pp-gm-action-pill pp-gm-action-level"><b>${escapeHtml(levelLabel)}</b><strong>${escapeHtml(levelText)}</strong></span>` : "",
+    `<span class="pp-gm-action-pill pp-gm-action-target"><b>Target</b><strong>${escapeHtml(targetText)}</strong></span>`,
+    playerChoice ? `<span class="pp-gm-action-pill"><b>${escapeHtml(playerChoiceLabel)}</b><strong>${escapeHtml(playerChoice)}</strong></span>` : ""
+  ].filter(Boolean).join("");
+  return {
+    targets,
+    levelText,
+    content: `
+      <section class="pp-gm-action-notice">
+        <div class="pp-gm-action-heading">
+          <span>${escapeHtml(requester)} / ${escapeHtml(actor.name)}</span>
+          <em>${escapeHtml(actionNoticeType(item))}</em>
+        </div>
+        <div class="pp-gm-action-summary">
+          <i class="fas ${escapeHtml(actionNoticeIcon(item))}"></i>
+          <strong>${escapeHtml(item.name)}</strong>
+          ${actionDetail ? `<small>${escapeHtml(actionDetail)}</small>` : ""}
+        </div>
+        <div class="pp-gm-action-details">${detailPills}</div>
+      </section>
+    `
+  };
+}
+
 async function gmUseItem(data) {
   const actor = gmActor(data.actorId);
   const item = actor?.items?.get?.(data.itemId);
@@ -6732,18 +7756,25 @@ async function gmUseItem(data) {
       at: Date.now()
     });
   }
-  const castLevel = Number(data.options?.castLevel ?? 0);
   const requester = game.users?.get?.(String(data.userId ?? ""))?.name ?? "Player";
-  const activityName = String(data.options?.activityName ?? "").trim();
-  const playerChoice = String(data.options?.playerChoice ?? "").trim();
-  const playerChoiceLabel = String(data.options?.playerChoiceLabel ?? "Player choice").trim();
-  const targetCount = Array.isArray(data.targetIds) ? data.targetIds.length : 0;
-  const requestLabel = `${item.name}${activityName ? ` - ${activityName}` : ""}${playerChoice ? ` (${playerChoiceLabel}: ${playerChoice})` : ""}${item.type === "spell" && castLevel > 0 ? ` at level ${castLevel}` : ""}`;
-  ui.notifications?.info?.(`${requester} requested ${requestLabel}${targetCount ? ` with ${targetCount} target${targetCount === 1 ? "" : "s"}` : ""}.`);
+  const notice = renderGmActionNotice({ requester, actor, item, data });
+  const toastParts = [
+    `${requester}: ACTION ${item.name}`,
+    notice.levelText ? `${systemAdapter(actor).id === "pf2e" ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
+    `TARGET ${compactTargetText(notice.targets)}`
+  ].filter(Boolean);
+  ui.notifications?.info?.(toastParts.join("  |  "));
   await ChatMessage.create({
     speaker: ChatMessage.getSpeaker({ actor }),
     whisper: asArray(game.users).filter((user) => user.isGM).map((user) => user.id),
-    content: `<p><strong>${escapeHtml(requester)}</strong> requested <strong>${escapeHtml(item.name)}</strong>${activityName ? ` - <strong>${escapeHtml(activityName)}</strong>` : ""}${playerChoice ? `<br><strong>${escapeHtml(playerChoiceLabel)}:</strong> ${escapeHtml(playerChoice)}` : ""}${item.type === "spell" && castLevel > 0 ? ` at <strong>Cast Level ${escapeHtml(castLevel)}</strong>` : ""}${targetCount ? ` with <strong>${escapeHtml(targetCount)} target${targetCount === 1 ? "" : "s"}</strong>` : ""}.</p>`
+    content: notice.content,
+    flags: {
+      [MODULE_ID]: {
+        actionNotice: true,
+        itemId: item.id,
+        actorId: actor.id
+      }
+    }
   });
   await withProxyTargetsForUser(data.userId, () => systemAdapter(actor).useItem(actor, item, data.options ?? {}));
 }
@@ -7186,26 +8217,50 @@ function showSharedImage(src, seconds = 20) {
   window.setTimeout(close, Math.max(5, Number(seconds) || 20) * 1000);
 }
 
-function bindJournalImageSharing(_app, html) {
-  if (!game.user?.isGM) return;
-  const root = html instanceof HTMLElement ? html : html?.[0] ?? null;
-  if (!(root instanceof HTMLElement) || root.dataset.ppJournalBound === "1") return;
-  root.dataset.ppJournalBound = "1";
-  root.addEventListener("click", (event) => {
-    const target = event.target instanceof HTMLElement ? event.target.closest("img") : null;
-    if (!(target instanceof HTMLImageElement)) return;
-    if (!(event.shiftKey || event.altKey)) return;
-    const src = target.currentSrc || target.src;
-    if (!src) return;
-    event.preventDefault();
-    event.stopPropagation();
-    sendSocket("journalImage", {
-      targetUserIds: userIdsForPilots(),
-      src,
-      duration: Number(setting("journalImageSeconds", 20))
-    });
-    ui.notifications?.info?.("Journal image shared with Player Pilot users.");
-  }, true);
+function renderRootElement(html) {
+  if (html instanceof HTMLElement) return html;
+  if (html?.[0] instanceof HTMLElement) return html[0];
+  return null;
+}
+
+function isSharedDocumentPopup(app, root) {
+  const className = String(app?.constructor?.name ?? "");
+  if (/ImagePopout|Journal.*Sheet/.test(className)) return true;
+  if (!(root instanceof HTMLElement)) return false;
+  return root.matches?.(
+    ".image-popout, .journal-sheet, .journal-entry, .journal-entry-page, "
+    + "[data-application-class='ImagePopout'], [data-application-class*='Journal']"
+  ) === true;
+}
+
+function closeSharedDocumentPopup(app, root) {
+  if (root instanceof HTMLElement) root.style.setProperty("display", "none", "important");
+  window.setTimeout(() => {
+    try {
+      app?.close?.({ force: true });
+    } catch (_err) {
+      try {
+        app?.close?.();
+      } catch (_innerErr) {
+        // Ignore close failures; the popup has already been hidden.
+      }
+    }
+  }, 0);
+}
+
+function handleSharedDocumentPopupRender(app, html) {
+  if (!userIsPilot()) return;
+  const root = renderRootElement(html);
+  if (!isSharedDocumentPopup(app, root)) return;
+
+  applySharedDocumentPopupMode();
+  if (!sharedDocumentPopupsEnabled()) {
+    closeSharedDocumentPopup(app, root);
+    return;
+  }
+
+  root?.classList?.add?.("pp-shared-document-popup");
+  window.setTimeout(() => app?.bringToTop?.(), 0);
 }
 
 function bindTokenHudTargetToggle(app, html) {
@@ -7507,12 +8562,12 @@ function registerHooks() {
   Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.once("init", () => {
     registerSettings();
-    const activePilot = userIsPilot();
+    const activePilot = earlyUserIsPilot();
     syncManagedNoCanvas(activePilot && setting('useNoCanvas', true) === true);
     if (activePilot) {
       startBootScreen();
       updateBootBranding();
-      updateBootProgress(34, "Loading Player Pilot settings...");
+      setBootStage(34, "Loading Player Pilot settings...", 72);
     } else removeBootScreen();
     if (activePilot) installAudioSuppression();
     installChatModeBridge();
@@ -7521,14 +8576,18 @@ function registerHooks() {
     });
   });
   Hooks.once("setup", () => {
-    if (!userIsPilot()) return;
+    if (!userIsPilot()) {
+      removeBootScreen();
+      return;
+    }
+    startBootScreen();
     updateBootBranding();
-    updateBootProgress(72, "Preparing your character controls...");
+    setBootStage(72, "Preparing your character controls...", 88);
     mountPilotShell();
   });
   Hooks.once("ready", async () => {
     updateBootBranding();
-    if (userIsPilot()) updateBootProgress(90, "Finishing character data...");
+    if (userIsPilot()) setBootStage(90, "Finishing character data...", 95);
     game.socket?.on?.(SOCKET, handleSocket);
     if (userIsPilot()) {
       registerChatCapture();
@@ -7538,7 +8597,7 @@ function registerHooks() {
     if (game.user?.isGM) installGmMapToggleButton();
     await enforceNoCanvasIfNeeded();
     if (userIsPilot()) {
-      installMobileResolutionWarningSuppression();
+      installFoundryNotificationAutoClose();
       installPilotPromptObserver();
       mountPilotShell();
       requestSceneState(true);
@@ -7590,15 +8649,36 @@ function registerHooks() {
   const gmSceneRefresh = () => {
     if (game.user?.isGM && gmSceneStateFingerprints.size > 0) sendSceneStateDebounced();
   };
+  const gmEffectSceneRefresh = (effect) => {
+    if (!game.user?.isGM || gmSceneStateFingerprints.size <= 0) return;
+    const actorId = String(effect?.parent?.id ?? effect?.actor?.id ?? "");
+    const scene = getSceneDoc();
+    if (!actorId || !asArray(scene?.tokens).some((token) => String(token.actor?.id ?? token.actorId ?? "") === actorId)) return;
+    sendSceneStateDebounced();
+  };
   Hooks.on("canvasReady", gmSceneRefresh);
   Hooks.on("createToken", gmSceneRefresh);
   Hooks.on("updateToken", gmSceneRefresh);
   Hooks.on("deleteToken", gmSceneRefresh);
   Hooks.on("updateScene", gmSceneRefresh);
-  Hooks.on("renderJournalSheet", bindJournalImageSharing);
-  Hooks.on("renderJournalPageSheet", bindJournalImageSharing);
-  Hooks.on("renderJournalTextPageSheet", bindJournalImageSharing);
-  Hooks.on("renderJournalImagePageSheet", bindJournalImageSharing);
+  Hooks.on("createCombat", gmSceneRefresh);
+  Hooks.on("updateCombat", gmSceneRefresh);
+  Hooks.on("deleteCombat", gmSceneRefresh);
+  Hooks.on("combatStart", gmSceneRefresh);
+  Hooks.on("combatEnd", gmSceneRefresh);
+  Hooks.on("createActiveEffect", gmEffectSceneRefresh);
+  Hooks.on("updateActiveEffect", gmEffectSceneRefresh);
+  Hooks.on("deleteActiveEffect", gmEffectSceneRefresh);
+  Hooks.on("renderImagePopout", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalPageSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalTextPageSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalImagePageSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalEntrySheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalEntryPageSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalEntryPageTextSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderJournalEntryPageImageSheet", handleSharedDocumentPopupRender);
+  Hooks.on("renderApplicationV2", handleSharedDocumentPopupRender);
   Hooks.on("renderDialog", applyPendingCastLevel);
   Hooks.on("renderTokenHUD", bindTokenHudTargetToggle);
 }

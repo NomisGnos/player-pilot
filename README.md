@@ -67,7 +67,7 @@ The shell has tabs for:
 - PF2e inventory carry choices for held in one hand, held in two hands, worn/equipped, carried, stowed, or dropped.
 - Limited-use counters beside Use for PF2e spells/actions and D&D5e feature cards in Actions.
 - Items inside containers are grouped by container name when the system data exposes that link.
-- Shift-click or Alt-click a journal image as GM to share it with Player Pilot users.
+- Optional shared journal and image popups for enabled Player Pilot users.
 - Optional player audio suppression.
 - Optional no-canvas mode for enabled players.
 - A branded startup screen showing the active system logo and world title, including a note that the display may briefly go blank while Foundry loads.
@@ -79,7 +79,7 @@ The shell has tabs for:
 - `Use No-Canvas Mode`: reduces player client rendering. This is recommended for phones.
 - `Movement Authority`: player-first with GM fallback, or always GM-authoritative.
 - `Ping Snapshot Approval`: manual GM approval or automatic snapshot sending.
-- `Journal Image Duration`: how long shared journal images stay on player screens.
+- `Show Shared Journals and Images`: allows shared journals and image popouts to appear above the mobile interface.
 - `Suppress Player Audio`: stops local audio playback on enabled player clients.
 - `Respect Combat Turns`: blocks movement and action buttons when it is not the actor's turn.
 
@@ -100,6 +100,8 @@ Player Pilot has native adapters for D&D5e and PF2e. The D&D path remains isolat
 
 The current compatibility targets are D&D5e 5.3.3 and PF2e 8.2.0 on Foundry VTT 14.363. The shared movement, targeting, map, and GM-proxy features are system-independent; actor mechanics are routed through the active system adapter.
 
+Neither system is an installation dependency of the module. A PF2e world does not need D&D5e installed, and a D&D5e world does not need PF2e installed. Shared interface assets come from Player Pilot or Foundry core; only the active system's document APIs and actor/item images are used.
+
 Other systems may show actors and items through the generic adapter, but they are not complete yet.
 
 ## Known Limits
@@ -110,7 +112,7 @@ Other systems may show actors and items through the generic adapter, but they ar
 - Ping On Map is approximate. It is for "around here" pings, not precision measurement.
 - Player-first movement depends on token permissions and the system/world setup. If local movement fails, the request goes to the GM.
 - A connected GM client is still recommended for the best experience.
-- Journal image sharing uses Shift-click or Alt-click on a journal image from the GM client.
+- Shared journal and image popups are optional because the Player Pilot shell otherwise remains the main player-facing surface.
 
 ## Support
 

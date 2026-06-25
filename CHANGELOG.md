@@ -1,8 +1,66 @@
 # Changelog
 
+## v0.2.10
+
+- Added conservative Sneak Attack applicability checks for finesse/ranged weapons, the selected target, disadvantage, advantage, and a non-incapacitated ally near the target.
+- Sneak Attack now reads `Apply Sneak Attack`, `Apply Sneak Attack (if applicable)`, or `Sneak Attack not applicable` with a short explanation, while noting that once-per-turn use cannot be confirmed automatically.
+- Stopped redistributing copied D&D5e SVGs and moved shared interface artwork away from installed-system asset paths.
+- Replaced system and Font Awesome dice dependencies with a complete module-local CC BY 3.0 dice set from Game-icons.net.
+- Removed remaining D&D5e/PF2e asset-path dependencies, made shared roll visuals use Foundry core assets, and prevented the generic adapter from inheriting D&D preparation, equipment, advantage, and spell-scaling gates.
+- Added conservative singular-target inference when structured counts are blank, while leaving ambiguous and cast-level-dependent target limits to the player and GM.
+- Fixed D&D5e healing activities such as Cure Wounds so they remain healing, retain the spellcasting modifier, and preview the correct higher-slot dice.
+- Standardized roll-instruction copy width for cleaner alignment and made the no-qualifier Sneak Attack state a prominent warning while retaining an explicit table-ruling override.
+- Reworked PF2e strikes into the staged target-to-roll flow, limited PF2e cast-rank prompts to real rank choices, and expanded target lists with visible combatants plus target effect badges.
+- Matched PF2e strike roll cards to the shared spell roll-card formatting so attack, MAP, damage, and critical controls align consistently.
+- PF2e strike damage and critical cards now preview the native PF2e damage formula when available instead of showing only generic reminder text.
+- Matched PF2e spell attack MAP labels to weapon strikes by showing the final modifier first, then the MAP note.
+
+## v0.2.9
+
+- Replaced the unsupported animated CSS percentage with ordinary text that visibly counts upward one number at a time, pauses at safe stage ceilings, and resumes without milestone jumps.
+- Increased Player Pilot's base font size and substantially enlarged the Upcast Preview heading, explanation, effect label, formula, and increase text.
+
+## v0.2.8
+
+- Made the plain loading percentage count upward on the same animated timeline as the progress bar.
+- Aligned roll instruction copy and action buttons into consistent columns, with responsive stacking on smaller screens.
+- Added flat formula modifiers beside dice icons and visually separated attack, damage, healing, and save roll cards.
+- Added full PF2e skill/save icon mappings and their underlying ability metadata so rolls no longer fall back to one repeated icon.
+
+## v0.2.7
+
+- Replaced the loading-percentage odometer with a normal, stable percentage label while retaining the smooth progress-bar animation.
+
+## v0.2.6
+
+- Synchronized the visible loading percentage with the compositor-driven progress bar using an animated odometer, so the number continues advancing during hard-refresh startup stalls.
+
+## v0.2.5
+
+- Reframed the cast-level damage display as an informational Upcast Preview, including the additional dice gained at the selected level.
+- Added a clear Rolls Still Required step and renamed the cast button so players know attack, save, damage, or healing rolls still follow.
+- Moved estimated loader motion to a monotonic compositor-driven transform so the bar can continue gliding during hard-refresh startup stalls.
+
+## v0.2.4
+
+- Smoothed the startup loader with device-paced progress between real Foundry milestones.
+- Added stage ceilings and monotonic progress so estimated loading never races ahead and then moves backward.
+- Kept the progress bar visibly active while a slow startup stage is waiting.
+
+## v0.2.3
+
+- Added compact GM-only action notices for spells, weapons, items, and features with prominent cast level and named targets.
+- Added a player-facing concentration gate that requires confirming the current spell will end before another concentration spell can be used.
+
+## v0.2.2
+
+- Updated rules-text enrichment to use Foundry V14's namespaced TextEditor implementation without triggering the deprecated global warning.
+- Fixed the Player Pilot loading screen startup race by identifying the current user from Foundry's pre-document world data, then reconciling the overlay against authoritative user settings during setup.
+- Removed Foundry's unusable-window-dimensions notice immediately for Player Pilot users and gave every other non-progress Foundry notification a ten-second timeout, using the notification API so dismissed notices no longer occupy an internal notification slot.
+
 ## v0.2.1
 
-- Restored a human-visible selected-player loading screen on fast and cached browser loads, including the world title, system branding, Foundry loading status, and blank-screen warning; the completed loader now remains through a confirmed painted frame before handing off to Player Pilot.
+- Restored the loading screen as the first full-screen view for players, kept it outside Foundry's replaceable page body, and held it through a confirmed painted Player Pilot handoff so the Pilot page and black background cannot flash between startup stages.
 
 ## v0.2.0
 
