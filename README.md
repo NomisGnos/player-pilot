@@ -35,10 +35,13 @@ Or install it manually:
 3. Enable `Player Pilot` in your world.
 4. Open `Game Settings -> Configure Settings -> Module Settings`.
 5. Open `Player Pilot Access`.
-6. Check the players who should use the mobile interface.
-7. Have those players log in from their phone or tablet.
-8. Give each player owner permission on their character actor.
-9. Keep a GM client connected for movement fallback, map snapshots, shared pings, and GM-authoritative actions.
+   
+   <img width="761" height="662" alt="image" src="https://github.com/user-attachments/assets/818a4135-f5ad-4fc2-b228-35f2c950d8d2" />
+   
+7. Check the players who should use the mobile interface.
+8. Have those players log in from their phone or tablet.
+9. Give each player owner permission on their character actor.
+10. Keep a GM client connected for movement fallback, map snapshots, shared pings, and GM-authoritative actions.
 
 ## Main Flow
 
@@ -47,6 +50,11 @@ Players log in normally. If they are enabled for Player Pilot, the module covers
 The shell has tabs for:
 
 - `Actions`: quick rolls and usable actions.
+
+<img width="751" height="857" alt="image" src="https://github.com/user-attachments/assets/f4771512-385e-45de-a30c-a5d50dbd8f91" />
+<img width="676" height="247" alt="image" src="https://github.com/user-attachments/assets/c080a999-991a-4f01-bd2f-e2ad9c294f69" />
+<img width="686" height="324" alt="image" src="https://github.com/user-attachments/assets/7ac76199-db3d-4983-bcd8-32905919f512" />
+
 - `Rolls`: system-native checks, saves, skills, Perception, and similar statistics.
 - `Spells`: actor spells, grouped from the system item data.
 - `Features`: class features, feats, actions, and similar actor abilities.
@@ -75,6 +83,8 @@ The shell has tabs for:
 - Target proxying for GM-executed item use.
 - Ping the active token and use Ping On Map snapshots.
 - Ping On Map snapshot request and tap-to-ping workflow.
+  <img width="768" height="716" alt="image" src="https://github.com/user-attachments/assets/9987b983-53c1-4588-8bde-4d44f9e627d5" />
+
 - D&D5e prepared-spell toggles.
 - PF2e prepared-slot availability and native slot expenditure without applying D&D preparation rules.
 - Optional combat-turn lock for tables that only want the active combatant acting.
