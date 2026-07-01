@@ -4,6 +4,7 @@ const OWNER = 3;
 const CORE_ICON_ROOT = "icons/svg";
 const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
+const GM_MAP_TOGGLE_POSITION_KEY = `${MODULE_ID}.gmMapTogglePosition`;
 const BOOT_MIN_VISIBLE_MS = 1800;
 const BOOT_READY_HOLD_MS = 1200;
 const BOOT_PROGRESS_INTERVAL_MS = 250;
@@ -186,15 +187,17 @@ function paintBootProgress(screen, current, label = "", target = current, durati
     }
   };
   if (fill instanceof HTMLElement) {
-    setAnimatedTransform(fill, `scaleX(${safeCurrent / 100})`, `scaleX(${safeTarget / 100})`);
+    const shownProgress = safeCurrent >= 100
+      ? Math.max(bootState.displayedProgress, 99)
+      : bootState.displayedProgress;
+    setAnimatedTransform(fill, `scaleX(${clamp(shownProgress, 0, 100) / 100})`, `scaleX(${clamp(shownProgress, 0, 100) / 100})`);
   }
   if (percent instanceof HTMLElement) {
-    if (safeCurrent >= 100) bootState.displayedProgress = 100;
     const shown = clamp(Math.round(bootState.displayedProgress), 0, 100);
     percent.textContent = `${shown}%`;
     percent.setAttribute("aria-label", `${shown} percent`);
   }
-  if (track) track.setAttribute("aria-valuenow", String(Math.round(safeCurrent)));
+  if (track) track.setAttribute("aria-valuenow", String(Math.round(bootState.displayedProgress)));
   if (text && label) text.textContent = label;
 }
 
@@ -202,11 +205,20 @@ function refreshBootEstimate() {
   const screen = bootState.screen;
   if (!(screen instanceof HTMLElement) || !screen.isConnected) return;
   const estimate = estimatedBootProgress();
+  const fill = screen.querySelector("[data-pp-boot-fill]");
   const track = screen.querySelector(".pp-boot-track");
   const percent = screen.querySelector("[data-pp-boot-percent]");
-  const desired = Math.min(99, Math.floor(estimate));
-  if (bootState.displayedProgress < desired) bootState.displayedProgress += 1;
-  if (track) track.setAttribute("aria-valuenow", String(Math.round(estimate)));
+  const desired = bootState.driftTarget >= 100 ? Math.floor(estimate) : Math.min(99, Math.floor(estimate));
+  if (bootState.displayedProgress < desired) {
+    const gap = desired - bootState.displayedProgress;
+    const step = gap >= 16 ? 3 : (gap >= 7 ? 2 : 1);
+    bootState.displayedProgress = Math.min(desired, bootState.displayedProgress + step);
+  }
+  if (fill instanceof HTMLElement) {
+    fill.style.transition = `transform ${Math.max(180, BOOT_PROGRESS_INTERVAL_MS - 20)}ms linear`;
+    fill.style.transform = `scaleX(${clamp(bootState.displayedProgress, 0, 100) / 100})`;
+  }
+  if (track) track.setAttribute("aria-valuenow", String(Math.round(bootState.displayedProgress)));
   if (percent) {
     const shown = clamp(Math.round(bootState.displayedProgress), 0, 100);
     percent.textContent = `${shown}%`;
@@ -318,11 +330,7 @@ function setBootStage(progress, label, fakeCeiling) {
   const previousEstimate = estimatedBootProgress(now);
   const stageElapsed = bootState.lastStageAt ? now - bootState.lastStageAt : BOOT_INITIAL_DRIFT_MS;
   const duration = clamp(stageElapsed * 2.4, BOOT_MIN_DRIFT_MS, BOOT_MAX_DRIFT_MS);
-  const snapToMilestone = milestone <= 34 || milestone >= 100;
-  bootState.progress = snapToMilestone
-    ? Math.max(bootState.progress, previousEstimate, milestone)
-    : Math.max(bootState.progress, previousEstimate);
-  if (milestone <= 34) bootState.displayedProgress = Math.max(bootState.displayedProgress, Math.round(milestone));
+  bootState.progress = Math.max(bootState.progress, previousEstimate, milestone);
   if (milestone >= 100) bootState.displayedProgress = 100;
   bootState.fakeCeiling = Math.max(bootState.fakeCeiling, ceiling);
   bootState.driftStart = bootState.progress;
@@ -399,6 +407,9 @@ const state = {
   mapPanX: 0,
   mapPanY: 0,
   mapDrag: null,
+  mapPointers: new Map(),
+  mapPinch: null,
+  mapSuppressClickUntil: 0,
   navOpen: false,
   lastMoveLabel: "",
   lastMoveDir: "",
@@ -1181,8 +1192,23 @@ function itemTargetInfo(item, activityId = "") {
     text: limitKnown && count > 0 && type ? `${count} ${type}` : capitalizeWords(type),
     needsTarget,
     selfOnly,
-    allowSelf
+    allowSelf,
+    hasAreaTemplate
   };
+}
+
+function itemRequiresMapPlacement(item, activityId = "") {
+  if (item?.type !== "spell") return false;
+  const selected = activityId ? selectedItemActivity(item, activityId)?.activity : null;
+  const sources = selected
+    ? [activitySystem(selected), item?.system]
+    : [item?.system, ...getItemActivities(item).map(activitySystem)];
+  if (sources.some((source) => fieldText(source?.target?.template?.type, source?.target?.area?.type))) return true;
+  const text = htmlToPlain(item?.system?.description?.value ?? item?.system?.description ?? "").toLowerCase();
+  const name = String(item?.name ?? "").toLowerCase();
+  if (/\bmisty step\b/.test(name) || /\bteleport(?:s|ed|ing)?\b/.test(text)) return true;
+  return /\b(?:point|space|location|spot)\b.{0,90}\b(?:choose|chosen|you can see|within range|unoccupied)\b/i.test(text)
+    || /\b(?:choose|chosen|you can see|within range|unoccupied)\b.{0,90}\b(?:point|space|location|spot)\b/i.test(text);
 }
 
 function itemRangeLabel(item) {
@@ -1517,6 +1543,30 @@ function concentrationEffectLabel(actor, effect) {
   return effectName.replace(/^concentrat(?:ing|ion)\s*:\s*/i, "") || "an active spell";
 }
 
+async function endActorConcentration(actor, effectId) {
+  const id = String(effectId ?? "");
+  if (!actor || !id) return false;
+  if (typeof actor.endConcentration === "function") {
+    try {
+      await actor.endConcentration(id);
+      return true;
+    } catch (err) {
+      console.warn("Player Pilot could not end concentration through D&D5e.", err);
+    }
+  }
+  const effect = actor.effects?.get?.(id) ?? asArray(actor.effects).find((entry) => String(entry?.id ?? "") === id);
+  if (!effect) return false;
+  if (typeof effect.delete === "function") {
+    await effect.delete();
+    return true;
+  }
+  if (typeof actor.deleteEmbeddedDocuments === "function") {
+    await actor.deleteEmbeddedDocuments("ActiveEffect", [id]);
+    return true;
+  }
+  return false;
+}
+
 function hasItemProperty(item, key) {
   const props = item?.system?.properties;
   const wanted = String(key ?? "").toLowerCase();
@@ -1756,11 +1806,14 @@ const DND5E_ADAPTER = {
         useOptions.slotLevel = level;
         useOptions.castLevel = level;
       }
+      const scaling = item.type === "spell" ? dndSpellScalingIncrease(actor, item, Number.isFinite(level) ? level : options.castLevel) : 0;
+      if (scaling > 0) useOptions.scaling = scaling;
       if (options.ammoItemId) {
         useOptions.ammunition = options.ammoItemId;
         useOptions.ammo = options.ammoItemId;
       }
       if (options.replaceConcentrationEffectId) {
+        await endActorConcentration(actor, options.replaceConcentrationEffectId);
         useOptions.concentration = {
           begin: true,
           end: String(options.replaceConcentrationEffectId)
@@ -1901,6 +1954,24 @@ function getDndTotalLevel(actor) {
   return asArray(actor?.items)
     .filter((item) => item.type === "class")
     .reduce((total, item) => total + Number(item.system?.levels ?? 0), 0);
+}
+
+function dndCantripScalingIncrease(actor, item) {
+  const systemLevel = Number(actor?.system?.cantripLevel?.(item));
+  const level = Number.isFinite(systemLevel) && systemLevel > 0
+    ? systemLevel
+    : Number(actor?.system?.details?.level ?? getDndTotalLevel(actor) ?? 0);
+  return Math.max(0, Math.floor(((Number.isFinite(level) ? level : 0) + 1) / 6));
+}
+
+function dndSpellScalingIncrease(actor, item, castLevel = "") {
+  const baseLevel = Number(item?.system?.level ?? item?.system?.rank ?? 0);
+  if (!Number.isFinite(baseLevel)) return 0;
+  if (baseLevel <= 0) return dndCantripScalingIncrease(actor, item);
+  const level = Number(castLevel ?? 0);
+  if (Number.isFinite(level) && level > baseLevel) return level - baseLevel;
+  const flagged = Number(item?.getFlag?.("dnd5e", "scaling") ?? item?.flags?.dnd5e?.scaling ?? NaN);
+  return Number.isFinite(flagged) && flagged > 0 ? flagged : 0;
 }
 
 function signedMod(value) {
@@ -4131,14 +4202,14 @@ function renderSmartBadge(text) {
 
 function renderCheckCard(check) {
   const searchText = `${check.name} ${check.badge} ${check.formula ?? ""}`;
-  const mod = signedMod(parseD20Mod(check.formula ?? "d20"));
+  const formula = compactD20Formula(check.formula ?? "d20");
   return `
     <article class="pp-card pp-roll-card pp-searchable" data-search="${escapeHtml(searchText)}">
       ${renderInterfaceIcon(rollCardIcon(check), "pp-roll-type-icon")}
       <div class="pp-card-main">
         <div class="pp-card-title"><span>${escapeHtml(check.name)}</span></div>
         <div class="pp-roll-line">
-          <span>${escapeHtml(check.badge || "Roll")} <strong>${escapeHtml(mod)}</strong></span>
+          <span><strong>${escapeHtml(formula)}</strong></span>
           ${renderD20RollButton(check)}
         </div>
       </div>
@@ -4315,11 +4386,15 @@ function renderMapView(actor) {
         <div class="pp-section">
           ${renderSectionHeader("Movement", "fa-person-running")}
           <div class="pp-dpad">
+            <button class="up-left" type="button" data-action="move" data-dir="up-left" aria-label="Move up left"><i class="fas fa-arrow-up"></i></button>
             <button class="up" type="button" data-action="move" data-dir="up"><i class="fas fa-arrow-up"></i></button>
+            <button class="up-right" type="button" data-action="move" data-dir="up-right" aria-label="Move up right"><i class="fas fa-arrow-up"></i></button>
             <button class="left" type="button" data-action="move" data-dir="left"><i class="fas fa-arrow-left"></i></button>
             <button class="center" type="button" data-action="ping-token"><i class="fas fa-location-dot"></i></button>
             <button class="right" type="button" data-action="move" data-dir="right"><i class="fas fa-arrow-right"></i></button>
+            <button class="down-left" type="button" data-action="move" data-dir="down-left" aria-label="Move down left"><i class="fas fa-arrow-down"></i></button>
             <button class="down" type="button" data-action="move" data-dir="down"><i class="fas fa-arrow-down"></i></button>
+            <button class="down-right" type="button" data-action="move" data-dir="down-right" aria-label="Move down right"><i class="fas fa-arrow-down"></i></button>
           </div>
           ${renderMovementStatus()}
         </div>
@@ -4351,7 +4426,11 @@ function renderMovementStatus() {
     up: "fa-arrow-up",
     down: "fa-arrow-down",
     left: "fa-arrow-left",
-    right: "fa-arrow-right"
+    right: "fa-arrow-right",
+    "up-left": "fa-route",
+    "up-right": "fa-route",
+    "down-left": "fa-route",
+    "down-right": "fa-route"
   })[state.lastMoveDir] ?? "fa-route";
   return `
     <div class="pp-move-status">
@@ -4401,38 +4480,103 @@ function handleWheel(event) {
   if (isInShell(target)) markPilotInteracting();
 }
 
+function setMapTransform(map = state.shell?.querySelector(".pp-map-img")) {
+  if (!(map instanceof HTMLElement)) return;
+  map.style.setProperty("--pp-map-zoom", `${state.mapZoom}`);
+  map.style.setProperty("--pp-map-pan-x", `${state.mapPanX}px`);
+  map.style.setProperty("--pp-map-pan-y", `${state.mapPanY}px`);
+}
+
+function mapPointerList() {
+  return Array.from(state.mapPointers?.values?.() ?? []);
+}
+
+function pointerDistance(a, b) {
+  return Math.hypot(Number(a?.x ?? 0) - Number(b?.x ?? 0), Number(a?.y ?? 0) - Number(b?.y ?? 0));
+}
+
+function beginMapPinch() {
+  const points = mapPointerList();
+  if (points.length < 2) return;
+  state.mapPinch = {
+    distance: Math.max(1, pointerDistance(points[0], points[1])),
+    zoom: Number(state.mapZoom ?? 1),
+    panX: Number(state.mapPanX ?? 0),
+    panY: Number(state.mapPanY ?? 0),
+    moved: false
+  };
+  state.mapDrag = null;
+}
+
 function handlePointerDown(event) {
   const target = event.target instanceof HTMLElement ? event.target : null;
   const map = target?.closest?.(".pp-map-img");
   if (!(map instanceof HTMLElement) || !isInShell(map) || !state.mapSnapshot?.image) return;
-  if (Number(state.mapZoom ?? 1) <= 1) return;
-  state.mapDrag = {
+  event.preventDefault();
+  markPilotInteracting();
+  state.mapPointers.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+  map.setPointerCapture?.(event.pointerId);
+  if (state.mapPointers.size >= 2) {
+    beginMapPinch();
+    return;
+  }
+  state.mapDrag = Number(state.mapZoom ?? 1) > 1 ? {
+    pointerId: event.pointerId,
     x: event.clientX,
     y: event.clientY,
     panX: Number(state.mapPanX ?? 0),
     panY: Number(state.mapPanY ?? 0),
     moved: false
-  };
-  map.setPointerCapture?.(event.pointerId);
+  } : null;
 }
 
 function handlePointerMove(event) {
-  if (!state.mapDrag) return;
+  if (state.mapPointers?.has?.(event.pointerId)) {
+    state.mapPointers.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+  }
+  if (state.mapPinch && state.mapPointers.size >= 2) {
+    event.preventDefault();
+    markPilotInteracting();
+    const points = mapPointerList();
+    const distance = Math.max(1, pointerDistance(points[0], points[1]));
+    const nextZoom = clamp(Number(state.mapPinch.zoom ?? 1) * (distance / Math.max(1, Number(state.mapPinch.distance ?? 1))), 0.75, 3);
+    if (Math.abs(nextZoom - Number(state.mapPinch.zoom ?? 1)) > 0.01) state.mapPinch.moved = true;
+    state.mapZoom = nextZoom;
+    setMapTransform();
+    return;
+  }
+  if (!state.mapDrag || state.mapDrag.pointerId !== event.pointerId) return;
+  event.preventDefault();
   const dx = event.clientX - state.mapDrag.x;
   const dy = event.clientY - state.mapDrag.y;
   if (Math.abs(dx) + Math.abs(dy) > 4) state.mapDrag.moved = true;
   state.mapPanX = state.mapDrag.panX + dx;
   state.mapPanY = state.mapDrag.panY + dy;
-  const map = state.shell?.querySelector(".pp-map-img");
-  if (map instanceof HTMLElement) {
-    map.style.setProperty("--pp-map-pan-x", `${state.mapPanX}px`);
-    map.style.setProperty("--pp-map-pan-y", `${state.mapPanY}px`);
-  }
+  setMapTransform();
 }
 
-function handlePointerUp() {
+function handlePointerUp(event) {
+  if (state.mapPointers?.has?.(event.pointerId)) state.mapPointers.delete(event.pointerId);
+  if (state.mapPinch && state.mapPointers.size < 2) {
+    if (state.mapPinch.moved === true) state.mapSuppressClickUntil = Date.now() + 450;
+    if (state.mapPointers.size === 1 && Number(state.mapZoom ?? 1) > 1) {
+      const point = mapPointerList()[0];
+      state.mapDrag = {
+        pointerId: Number(point?.id ?? event.pointerId),
+        x: Number(point?.x ?? event.clientX),
+        y: Number(point?.y ?? event.clientY),
+        panX: Number(state.mapPanX ?? 0),
+        panY: Number(state.mapPanY ?? 0),
+        moved: state.mapPinch.moved === true
+      };
+    }
+    state.mapPinch = null;
+  }
   window.setTimeout(() => {
-    state.mapDrag = null;
+    if (!state.mapPointers?.size) {
+      state.mapDrag = null;
+      state.mapPinch = null;
+    }
   }, 0);
 }
 
@@ -4875,14 +5019,27 @@ function openUseDialog(itemId, flowOptions = {}) {
   };
   const finishUseFlow = async (modal, options, currentInstructions) => {
     await useItem(itemId, options, { showReminder: false });
-    if (!hasFollowupRolls(currentInstructions)) {
+    const placementNeeded = itemRequiresMapPlacement(item, options.activityId);
+    if (!hasFollowupRolls(currentInstructions) && !placementNeeded) {
       closeModal();
       return;
     }
     modal.querySelectorAll("[data-use-step]").forEach((step) => step.classList.add("hidden"));
     modal.querySelector("[data-use-step='rolls']")?.classList?.remove?.("hidden");
+    const title = modal.querySelector("[data-rolls-heading-title]");
+    const detail = modal.querySelector("[data-rolls-heading-detail]");
+    if (title && placementNeeded && !hasFollowupRolls(currentInstructions)) title.textContent = "Placement Needed";
+    if (detail && placementNeeded) detail.textContent = hasFollowupRolls(currentInstructions)
+      ? "After resolving the rolls below, ping the map so the GM knows where to place the effect."
+      : "Ping the map so the GM knows where to place the effect.";
+    modal.querySelector("[data-placement-prompt]")?.classList?.toggle?.("hidden", !placementNeeded);
     modal.querySelectorAll(".pp-dialog-actions [data-modal-action]:not([data-modal-action='close'])").forEach((button) => button.classList.add("hidden"));
-    modal.querySelector("[data-final-done]")?.classList?.remove?.("hidden");
+    const finalButton = modal.querySelector("[data-final-done]");
+    if (finalButton instanceof HTMLElement) {
+      finalButton.dataset.modalAction = placementNeeded ? "goToPing" : "close";
+      finalButton.textContent = placementNeeded ? "Ping On Map" : "Done";
+      finalButton.classList.remove("hidden");
+    }
   };
   openModal(`
     <h2>Use ${escapeHtml(itemDisplayName(item))}</h2>
@@ -4930,9 +5087,13 @@ function openUseDialog(itemId, flowOptions = {}) {
       <div class="pp-rolls-required-heading">
         <i class="fas fa-list-check"></i>
         <div>
-          <strong>Rolls Still Required</strong>
-          <span>Complete each applicable attack, save, damage, healing, or system roll step below.</span>
+          <strong data-rolls-heading-title>Rolls Still Required</strong>
+          <span data-rolls-heading-detail>Complete each applicable attack, save, damage, healing, or system roll step below.</span>
         </div>
+      </div>
+      <div class="pp-placement-prompt hidden" data-placement-prompt>
+        <i class="fas fa-map-location-dot"></i>
+        <div><strong>Placement needed</strong><span>Use Ping On Map so the GM can place the template, teleport, or chosen point.</span></div>
       </div>
       ${sneakAttack ? `<div data-sneak-attack-control>${renderSneakAttackChoice(sneakAttack, assessSneakAttackApplicability(actor, item, defaultActivityId))}</div>` : ""}
       <div data-roll-instructions>${renderRollInstructions(instructions, true)}</div>
@@ -5040,6 +5201,10 @@ function openUseDialog(itemId, flowOptions = {}) {
     },
     nativeInstruction: async (_modal, button) => {
       await runNativeItemRoll(item, button.dataset.nativeAction ?? "", button.dataset.castRank, button.dataset.attackNumber);
+    },
+    goToPing: async () => {
+      closeModal();
+      openPingOnMap();
     },
     change: async (modal, target) => {
       if (target instanceof HTMLInputElement && target.name === "useSneakAttack") {
@@ -5468,8 +5633,18 @@ function collectRollInstructions(item, actor, options = {}) {
   const entries = [];
   const system = item?.system ?? {};
   const labels = item?.labels ?? {};
+  const itemActivities = getItemActivities(item);
   const chosenActivity = options.activityId ? selectedItemActivity(item, options.activityId)?.activity : null;
   const chosenAttackMode = isDnd5e && chosenActivity ? attackRollMode(actor, chosenActivity) : {};
+  const activityHasEffectRolls = (activity) => {
+    const data = activitySystem(activity);
+    const damage = data?.damage ?? {};
+    const healing = data?.healing ?? {};
+    return !!fieldText(damage.formula, healing.formula)
+      || (Array.isArray(damage.parts) ? damage.parts : Object.values(damage.parts ?? {})).length > 0
+      || (Array.isArray(healing.parts) ? healing.parts : Object.values(healing.parts ?? {})).length > 0;
+  };
+  const preferActivityEffects = isDnd5e && item?.type === "spell" && itemActivities.some(activityHasEffectRolls);
   const push = (entry) => {
     const effectKind = rollEffectKind(entry.kind, entry.label, entry.effectType, entry.activity);
     const next = {
@@ -5494,15 +5669,15 @@ function collectRollInstructions(item, actor, options = {}) {
     if (!entries.some((existing) => `${existing.label}|${existing.formula}|${existing.detail}` === key)) entries.push(next);
   };
   if (labels.toHit) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${labels.toHit}`, activity: chosenActivity, ...chosenAttackMode });
-  if (labels.damage) push({
+  if (!preferActivityEffects && labels.damage) push({
     kind: "damage",
     label: "Damage Roll",
     formula: fieldText(labels.damage?.formula, labels.damage),
     effectType: damageTypeLabel(labels.damage),
     activity: chosenActivity
   });
-  if (labels.healing) push({ kind: "healing", label: "Healing Roll", formula: fieldText(labels.healing?.formula, labels.healing), activity: chosenActivity });
-  if (Array.isArray(labels.damages)) {
+  if (!preferActivityEffects && labels.healing) push({ kind: "healing", label: "Healing Roll", formula: fieldText(labels.healing?.formula, labels.healing), activity: chosenActivity });
+  if (!preferActivityEffects && Array.isArray(labels.damages)) {
     labels.damages.forEach((damage) => {
       const type = damageTypeLabel(damage);
       push({
@@ -5516,7 +5691,7 @@ function collectRollInstructions(item, actor, options = {}) {
   }
   const systemDamage = system.damage ?? {};
   const systemDamageParts = Array.isArray(systemDamage.parts) ? systemDamage.parts : Object.values(systemDamage.parts ?? {});
-  systemDamageParts.forEach((part) => {
+  if (!preferActivityEffects) systemDamageParts.forEach((part) => {
     const formula = Array.isArray(part) ? part[0] : fieldText(part?.formula);
     const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
     push({ kind: "damage", label: `${capitalizeWords(type) || "Damage"} Roll`, formula, effectType: type, activity: chosenActivity });
@@ -5527,7 +5702,8 @@ function collectRollInstructions(item, actor, options = {}) {
   if (saveDc) push({ kind: "save", label: savingThrowLabel(saveAbility), detail: `The target must roll against Difficulty Class ${saveDc}.` });
   const selectedActivityId = String(options.activityId ?? "");
   const selectedActivity = selectedActivityId ? selectedItemActivity(item, selectedActivityId)?.activity : null;
-  const instructionActivities = selectedActivity ? [selectedActivity] : getItemActivities(item);
+  const selectedHasEffectRolls = selectedActivity ? activityHasEffectRolls(selectedActivity) : false;
+  const instructionActivities = selectedActivity && (!preferActivityEffects || selectedHasEffectRolls) ? [selectedActivity] : itemActivities;
   for (const activity of instructionActivities) {
     const activityData = activitySystem(activity);
     const attack = activityData?.attack ?? {};
@@ -5548,7 +5724,7 @@ function collectRollInstructions(item, actor, options = {}) {
           part?.formula,
           Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
         );
-      const scaledFormula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel) : rawFormula;
+      const scaledFormula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel, actor) : rawFormula;
       const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
       push({
         kind: "damage",
@@ -5569,7 +5745,7 @@ function collectRollInstructions(item, actor, options = {}) {
         : ""
     );
     const scaledHealingFormula = isDnd5e
-      ? scaleSpellPartFormula(rawHealingFormula, healing.scaling, item, options.castLevel)
+      ? scaleSpellPartFormula(rawHealingFormula, healing.scaling, item, options.castLevel, actor)
       : rawHealingFormula;
     if (scaledHealingFormula) push({
       kind: "healing",
@@ -5586,7 +5762,7 @@ function collectRollInstructions(item, actor, options = {}) {
           part?.formula,
           Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
         );
-      const formula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel) : rawFormula;
+      const formula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel, actor) : rawFormula;
       push({
         kind: "healing",
         label: "Healing Roll",
@@ -5823,22 +5999,22 @@ function applyCastLevelScaling(entries, item, castLevel) {
   }
 }
 
-function scaleSpellPartFormula(formula, scaling, item, castLevel) {
+function scaleSpellPartFormula(formula, scaling, item, castLevel, actor = null) {
   const base = String(formula ?? "").trim();
-  const scalingMode = String(scaling?.mode ?? "").toLowerCase();
-  if (!base || item?.type !== "spell" || !scaling || !["whole", "half"].includes(scalingMode)) return base;
-  const baseLevel = Number(item.system?.level ?? item.system?.rank ?? 0);
-  const level = Number(castLevel ?? baseLevel);
-  const levelSteps = level - baseLevel;
-  if (!Number.isFinite(levelSteps) || levelSteps <= 0) return base;
-  const steps = scalingMode === "half" ? Math.floor(levelSteps * 0.5) : levelSteps;
+  const effectiveScaling = scaling ?? item?.system?.scaling ?? {};
+  const rawMode = String(effectiveScaling?.mode ?? "").toLowerCase();
+  const scalingMode = rawMode === "cantrip" ? "whole" : rawMode;
+  if (!base || item?.type !== "spell" || !["whole", "half"].includes(scalingMode)) return base;
+  const increase = dndSpellScalingIncrease(actor, item, castLevel);
+  if (!Number.isFinite(increase) || increase <= 0) return base;
+  const steps = scalingMode === "half" ? Math.floor(increase * 0.5) : increase;
   if (steps <= 0) return base;
   const diceMatch = base.match(/^(\d+)\s*d\s*(\d+)(.*)$/i);
-  const scalingNumber = Number(scaling.number ?? 0);
+  const scalingNumber = Number(effectiveScaling.number ?? 0);
   if (diceMatch && Number.isFinite(scalingNumber) && scalingNumber > 0) {
     return `${Number(diceMatch[1]) + (scalingNumber * steps)}d${diceMatch[2]}${diceMatch[3] ?? ""}`.trim();
   }
-  const scalingFormula = String(scaling.formula ?? "").trim();
+  const scalingFormula = String(effectiveScaling.formula ?? "").trim();
   if (scalingFormula) return `${base} + ${steps === 1 ? scalingFormula : `${steps} * (${scalingFormula})`}`;
   return base;
 }
@@ -7043,8 +7219,9 @@ async function moveTokenDocument({ tokenId, sceneId, dir }) {
   const tokenDoc = scene?.tokens?.get?.(tokenId) ?? asArray(scene?.tokens).find((td) => td.id === tokenId);
   if (!tokenDoc) throw new Error("Token not found.");
   const grid = Number(canvas?.grid?.size ?? state.scene?.gridSize ?? scene.grid?.size ?? 100);
-  const dx = (dir === "left" ? -1 : dir === "right" ? 1 : 0) * grid;
-  const dy = (dir === "up" ? -1 : dir === "down" ? 1 : 0) * grid;
+  const directions = new Set(String(dir ?? "").toLowerCase().split(/[-_\s]+/).filter(Boolean));
+  const dx = (directions.has("left") ? -1 : directions.has("right") ? 1 : 0) * grid;
+  const dy = (directions.has("up") ? -1 : directions.has("down") ? 1 : 0) * grid;
   const maxW = Number(canvas?.dimensions?.width ?? state.scene?.width ?? Infinity);
   const maxH = Number(canvas?.dimensions?.height ?? state.scene?.height ?? Infinity);
   const width = Number(tokenDoc.width ?? 1) * grid;
@@ -7383,8 +7560,19 @@ function requestMapSnapshot() {
   addLog("Map snapshot requested");
 }
 
+function openPingOnMap() {
+  state.activeTab = "map";
+  state.navOpen = false;
+  state.mapZoom = 1;
+  state.mapPanX = 0;
+  state.mapPanY = 0;
+  queueRender();
+  requestMapSnapshot();
+}
+
 function handleMapSnapshotClick(event, node) {
   if (!state.mapSnapshot?.image) return;
+  if (Date.now() < Number(state.mapSuppressClickUntil ?? 0)) return;
   if (state.mapDrag?.moved) return;
   const img = node.querySelector("img");
   if (!(img instanceof HTMLImageElement)) return;
@@ -8311,18 +8499,103 @@ function installGmMapToggleButton() {
   button.id = "player-pilot-gm-map-toggle";
   button.type = "button";
   button.innerHTML = `<i class="fas fa-mobile-screen-button"></i>`;
+  const applyStoredPosition = () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(GM_MAP_TOGGLE_POSITION_KEY) ?? "null");
+      const left = Number(stored?.left);
+      const top = Number(stored?.top);
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+      button.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - 48))}px`;
+      button.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - 48))}px`;
+      button.style.bottom = "auto";
+    } catch (_err) {
+      // Ignore stale local storage.
+    }
+  };
   const sync = () => {
     const enabled = setting("mapControlsEnabled", true) === true;
     button.classList.toggle("enabled", enabled);
     button.title = enabled ? "Player Pilot controls are on" : "Player Pilot controls are off";
   };
-  button.addEventListener("click", async () => {
+  let drag = null;
+  let dragFrame = 0;
+  const applyDragPosition = () => {
+    dragFrame = 0;
+    if (!drag) return;
+    button.style.left = `${drag.nextLeft}px`;
+    button.style.top = `${drag.nextTop}px`;
+    button.style.bottom = "auto";
+  };
+  const queueDragPosition = () => {
+    if (!dragFrame) dragFrame = window.requestAnimationFrame(applyDragPosition);
+  };
+  const onDragMove = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    event.preventDefault();
+    event.stopPropagation();
+    drag.nextLeft = Math.round(clamp(drag.left + dx, 0, Math.max(0, window.innerWidth - button.offsetWidth)));
+    drag.nextTop = Math.round(clamp(drag.top + dy, 0, Math.max(0, window.innerHeight - button.offsetHeight)));
+    button.classList.add("dragging");
+    queueDragPosition();
+  };
+  const onDragEnd = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const moved = drag.moved;
+    const left = drag.nextLeft;
+    const top = drag.nextTop;
+    drag = null;
+    document.removeEventListener("pointermove", onDragMove, true);
+    document.removeEventListener("pointerup", onDragEnd, true);
+    document.removeEventListener("pointercancel", onDragEnd, true);
+    if (dragFrame) {
+      window.cancelAnimationFrame(dragFrame);
+      dragFrame = 0;
+    }
+    button.classList.remove("dragging");
+    if (moved) {
+      button.style.left = `${left}px`;
+      button.style.top = `${top}px`;
+      button.style.bottom = "auto";
+      localStorage.setItem(GM_MAP_TOGGLE_POSITION_KEY, JSON.stringify({ left, top }));
+      button.dataset.skipClick = "true";
+      window.setTimeout(() => { delete button.dataset.skipClick; }, 0);
+    }
+  };
+  button.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const rect = button.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+      nextLeft: Math.round(rect.left),
+      nextTop: Math.round(rect.top),
+      moved: false
+    };
+    document.addEventListener("pointermove", onDragMove, true);
+    document.addEventListener("pointerup", onDragEnd, true);
+    document.addEventListener("pointercancel", onDragEnd, true);
+  });
+  button.addEventListener("click", async (event) => {
+    if (button.dataset.skipClick === "true") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const next = !(setting("mapControlsEnabled", true) === true);
     await game.settings.set(MODULE_ID, "mapControlsEnabled", next);
     sync();
     sendSceneState();
   });
   document.body.appendChild(button);
+  applyStoredPosition();
   sync();
 }
 

@@ -1093,10 +1093,19 @@ body.player-pilot-active #pause {
 }
 
 .pp-dpad .up { grid-column: 2; grid-row: 1; }
+.pp-dpad .up-left { grid-column: 1; grid-row: 1; }
+.pp-dpad .up-right { grid-column: 3; grid-row: 1; }
 .pp-dpad .left { grid-column: 1; grid-row: 2; }
 .pp-dpad .center { grid-column: 2; grid-row: 2; }
 .pp-dpad .right { grid-column: 3; grid-row: 2; }
 .pp-dpad .down { grid-column: 2; grid-row: 3; }
+.pp-dpad .down-left { grid-column: 1; grid-row: 3; }
+.pp-dpad .down-right { grid-column: 3; grid-row: 3; }
+
+.pp-dpad .up-left i { transform: rotate(-45deg); }
+.pp-dpad .up-right i { transform: rotate(45deg); }
+.pp-dpad .down-left i { transform: rotate(45deg); }
+.pp-dpad .down-right i { transform: rotate(-45deg); }
 
 .pp-move-status {
   display: grid;
@@ -1216,6 +1225,7 @@ body.player-pilot-active #pause {
   border-radius: var(--pp-radius);
   background: #0b0f13;
   overflow: hidden;
+  touch-action: none;
 }
 
 .pp-map-img img {
@@ -1973,11 +1983,18 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   color: #f5f0e7;
   background: #6b2f2f;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 #player-pilot-gm-map-toggle.enabled {
   color: #06231f;
   background: var(--pp-accent);
+}
+
+#player-pilot-gm-map-toggle.dragging {
+  cursor: grabbing;
 }
 
 .control-icon.pp-targetlist-toggle.active {
@@ -4932,6 +4949,39 @@ body.player-pilot-active #notifications > .notification.error {
   box-shadow: inset 3px 0 0 #a48ce0;
 }
 
+.pp-placement-prompt {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 11px;
+  color: var(--pp-text);
+  background: rgba(98, 199, 178, 0.11);
+  border: 1px solid rgba(98, 199, 178, 0.32);
+  border-radius: var(--pp-radius);
+}
+
+.pp-placement-prompt > i {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: #06231f;
+  background: var(--pp-accent);
+  border-radius: 7px;
+}
+
+.pp-placement-prompt strong,
+.pp-placement-prompt span {
+  display: block;
+}
+
+.pp-placement-prompt span {
+  color: var(--pp-muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
 .pp-formula-dice {
   display: flex;
   align-items: center;
@@ -4955,6 +5005,15 @@ body.player-pilot-active #notifications > .notification.error {
 }
 
 @media (max-width: 560px) {
+  .pp-dialog-actions .pp-button {
+    min-height: 48px;
+    height: auto;
+    padding: 7px 9px;
+    white-space: normal;
+    line-height: 1.16;
+    overflow-wrap: anywhere;
+  }
+
   .pp-roll-instruction.pp-roll-choice-hero {
     grid-template-columns: 48px minmax(0, 1fr) !important;
   }
