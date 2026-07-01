@@ -398,6 +398,7 @@ body.player-pilot-active #pause {
 .pp-top-actions {
   display: flex;
   gap: 6px;
+  align-items: stretch;
 }
 
 .pp-icon-btn,
@@ -420,6 +421,7 @@ body.player-pilot-active #pause {
 
 .pp-icon-btn {
   width: var(--pp-tap);
+  height: var(--pp-tap);
   padding: 0;
   display: inline-grid;
   place-items: center;
@@ -5185,4 +5187,152 @@ body.player-pilot-active #notifications > .notification.error {
     grid-column: 2;
     justify-self: start;
   }
+}
+
+/* Player Pilot support, release notice, and final layout consistency. */
+.pp-support-footer {
+  display: grid;
+  place-items: center;
+  margin-top: 8px;
+  padding: 6px 0 2px;
+}
+
+.pp-support-footer a {
+  color: var(--pp-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.pp-support-footer a:hover,
+.pp-support-footer a:focus-visible {
+  color: var(--pp-accent);
+  text-decoration: underline;
+}
+
+.player-pilot-support-panel {
+  display: grid;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+
+.player-pilot-support-panel p {
+  margin: 0;
+}
+
+.player-pilot-support-panel a.pp-button {
+  display: inline-grid;
+  place-items: center;
+  min-height: 42px;
+  text-decoration: none;
+}
+
+.player-pilot-changelog ul {
+  margin-top: 0.5em;
+  padding-left: 1.35em;
+}
+
+.player-pilot-changelog li {
+  margin: 0.25em 0;
+}
+
+.player-pilot-changelog li > ul {
+  margin-top: 0.25em;
+}
+
+.player-pilot-changelog a {
+  font-weight: 800;
+}
+
+.pp-topbar {
+  align-items: stretch !important;
+}
+
+.pp-identity-block,
+.pp-top-actions .pp-icon-btn {
+  min-height: 58px !important;
+}
+
+.pp-top-actions .pp-icon-btn {
+  width: 46px !important;
+  height: auto !important;
+}
+
+.pp-section-header,
+.pp-spell-level-header,
+.pp-action-main-header .pp-section-header,
+.pp-card,
+.pp-roll-card,
+.pp-hp-panel,
+.pp-map-img,
+.pp-modal .pp-dialog {
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32) !important;
+}
+
+.pp-section-header,
+.pp-spell-level-header {
+  width: 100%;
+  min-height: 46px !important;
+  box-sizing: border-box;
+}
+
+.pp-section-header h2,
+.pp-section-header h3,
+.pp-spell-level-header h2,
+.pp-spell-level-header h3 {
+  font-size: 0.98rem !important;
+}
+
+.pp-dpad-wrap {
+  width: 100%;
+  justify-items: stretch;
+}
+
+.pp-section.pp-movement-section {
+  width: 100%;
+  justify-self: stretch;
+  justify-items: center;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pp-section.pp-movement-section > .pp-section-header {
+  justify-self: stretch;
+}
+
+.pp-section.pp-movement-section > .pp-dpad,
+.pp-section.pp-movement-section > .pp-move-status {
+  justify-self: center;
+}
+
+@media (min-width: 860px) {
+  .pp-dpad-wrap {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+.pp-section.pp-movement-section .pp-dpad {
+  grid-template-columns: repeat(3, 72px);
+  grid-template-rows: repeat(3, 64px);
+  gap: 14px;
+}
+
+.pp-section.pp-movement-section .pp-dpad button {
+  min-height: 64px;
+}
+
+@media (max-width: 430px) {
+  .pp-section.pp-movement-section .pp-dpad {
+    grid-template-columns: repeat(3, 62px);
+    grid-template-rows: repeat(3, 58px);
+    gap: 10px;
+  }
+
+  .pp-section.pp-movement-section .pp-dpad button {
+    min-height: 58px;
+  }
+}
+
+.pp-card.pp-special-feature {
+  border-left: 5px solid #d9ad3d !important;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32) !important;
 }

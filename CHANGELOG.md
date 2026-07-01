@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.14
+- Restored Rolls page check cards to show category labels such as Skill, Check, and Saving Throw with their modifier for consistent roll-card wording.
+- Added once-per-version GM changelog chat notice.
+- Standardized page shadow styling and tightened the top identity/action button heights.
+- Enlarged and centered the Movement section header and controls at wider sizes.
+- When going to a new page, scroll back to top.
+- Cleaned up features and actions listing features.
+- From **v0.2.13** if you missed it...
+    - Made the GM-side Player Pilot controls toggle draggable with smoother document-level pointer tracking and saved its position only when the drag is released.
+    - Added diagonal movement controls and diagonal token movement for the Controls page.
+    - Rebalanced the loading screen so the progress bar and percentage stay visually synchronized while still advancing through real startup milestones.
+    - ~~Changed Rolls page check cards to show the actual `d20 + modifier` formula instead of repeating category labels such as Skill.~~ See above.
+    - Improved narrow-screen spell-flow buttons so long labels such as Use Spell & Continue to Rolls wrap cleanly.
+    - Added mobile pinch-to-zoom support for Ping On Map snapshots and suppressed accidental pings after pinch gestures.
+    - Added a Ping On Map finish action for spells that likely need GM placement, such as measured templates, chosen points, or teleport destinations.
+    - Improved D&D5e spell roll previews by preferring modern activity damage, applying cantrip scaling such as Sacred Flame at character level 5, and falling back to damage-bearing activities when setup activities do not expose dice directly.
+    - Passed D&D5e spell scaling through delegated GM item use so system and CPR workflows receive the same scaling context as Player Pilot previews.
+    - Made confirmed D&D5e concentration replacement explicitly end the prior concentration effect on the GM side before using the new concentration spell.
+
 ## v0.2.13
 
 - Made the GM-side Player Pilot controls toggle draggable with smoother document-level pointer tracking and saved its position only when the drag is released.

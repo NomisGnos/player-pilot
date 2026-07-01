@@ -5,6 +5,7 @@ const CORE_ICON_ROOT = "icons/svg";
 const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
 const GM_MAP_TOGGLE_POSITION_KEY = `${MODULE_ID}.gmMapTogglePosition`;
+const SUPPORT_URL = "https://www.patreon.com/cw/nomisDM";
 const BOOT_MIN_VISIBLE_MS = 1800;
 const BOOT_READY_HOLD_MS = 1200;
 const BOOT_PROGRESS_INTERVAL_MS = 250;
@@ -411,6 +412,7 @@ const state = {
   mapPinch: null,
   mapSuppressClickUntil: 0,
   navOpen: false,
+  scrollBodyToTop: false,
   lastMoveLabel: "",
   lastMoveDir: "",
   movementBurst: {
@@ -1267,6 +1269,7 @@ function normalizeItem(item, group = "items") {
   const quantity = system.quantity === undefined ? null : Number(system.quantity);
   const equippable = itemIsEquippable(item);
   const equipped = itemIsEquipped(item);
+  const usesText = itemUsesText(item);
   return {
     id: item.id,
     name: itemDisplayName(item),
@@ -1288,10 +1291,11 @@ function normalizeItem(item, group = "items") {
     ritual: !!(system.components?.ritual || hasItemProperty(item, "ritual")),
     concentration: itemRequiresConcentration(item),
     special: itemIsSpecialFeature(item),
+    ammoRequired: itemNeedsAmmo(item),
     targetInfo: itemTargetInfo(item),
     description: htmlToPlain(system.description?.value ?? system.description ?? ""),
     spellDetails: spellDetailRows(item),
-    usesText: itemUsesText(item),
+    usesText,
     badges: itemBadges(item)
   };
 }
@@ -1307,8 +1311,15 @@ function normalizeGenericItem(item, group = "items") {
   };
 }
 
+const FEATURE_ITEM_TYPES = new Set(["feat", "action", "class", "subclass", "classfeature", "race", "background", "ancestry", "heritage"]);
+const ACTION_TIMING_TYPES = new Set(["action", "bonus", "reaction"]);
+
+function itemIsFeatureType(item) {
+  return FEATURE_ITEM_TYPES.has(item?.type);
+}
+
 function itemIsSpecialFeature(item) {
-  if (!["feat", "class", "subclass", "background", "race", "ancestry", "heritage", "classfeature", "action"].includes(item?.type)) return false;
+  if (!itemIsFeatureType(item)) return false;
   const sources = [item?.system, ...getItemActivities(item).map(activitySystem)];
   return sources.some((source) => {
     const activation = String(source?.activation?.type ?? source?.actionType ?? source?.type ?? "").toLowerCase();
@@ -1380,12 +1391,17 @@ function itemCanBeUsed(item) {
   return true;
 }
 
+function itemHasActionTiming(item) {
+  const activation = String(item?.activation ?? "").toLowerCase();
+  return ACTION_TIMING_TYPES.has(activation) || activation === "bonus action";
+}
+
 function itemBelongsInActions(item) {
   if (!item) return false;
   if (item.type === "spell") return item.usable === true;
   if (item.equippable) return item.equipped === true;
-  return ["feat", "action", "class", "subclass", "classfeature", "race", "background", "ancestry", "heritage",
-    "consumable", "tool", "equipment"].includes(item.type);
+  if (itemIsFeatureType(item)) return item.special === true || item.ammoRequired === true || !!item.usesText || itemHasActionTiming(item);
+  return ["consumable", "tool", "equipment"].includes(item.type);
 }
 
 function getItemActivities(item) {
@@ -1612,8 +1628,8 @@ const GENERIC_ADAPTER = {
     return {
       actions: items.filter(itemBelongsInActions),
       spells: items.filter((item) => item.type === "spell"),
-      features: items.filter((item) => ["feat", "action", "ancestry", "heritage", "classfeature"].includes(item.type)),
-      inventory: items.filter((item) => !["spell", "feat", "action", "classfeature"].includes(item.type)),
+      features: items.filter(itemIsFeatureType),
+      inventory: items.filter((item) => item.type !== "spell" && !itemIsFeatureType(item)),
       checks: []
     };
   },
@@ -1740,7 +1756,7 @@ const DND5E_ADAPTER = {
       actions,
       actionGroups: groupDndActions(actions),
       spells: normalized.filter((item) => item.type === "spell").sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)),
-      features: normalized.filter((item) => ["feat", "class", "subclass", "background", "race"].includes(item.type)),
+      features: normalized.filter(itemIsFeatureType),
       inventory: normalized.filter((item) => ["weapon", "equipment", "consumable", "tool", "loot", "backpack"].includes(item.type)),
       spellSlots: dndSpellSlots(actor),
       checks
@@ -2619,7 +2635,7 @@ const PF2E_ADAPTER = {
       actions,
       actionGroups: groupPf2eActions(actions),
       spells: normalized.filter((item) => item.type === "spell"),
-      features: normalized.filter((item) => ["feat", "action", "ancestry", "heritage", "class", "background"].includes(item.type)),
+      features: normalized.filter(itemIsFeatureType),
       inventory: normalized.filter((item) => {
         if (!["weapon", "armor", "shield", "equipment", "consumable", "backpack", "treasure", "ammo"].includes(item.type)) return false;
         return !(item.type === "treasure" && item.pf2e?.itemCategory === "coin");
@@ -2836,6 +2852,25 @@ class PlayerPilotAccessPanel extends FormApplication {
   }
 }
 
+class PlayerPilotSupportPanel extends FormApplication {
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: "player-pilot-support",
+      title: "Support Player Pilot",
+      template: "modules/player-pilot/templates/support-panel.html",
+      width: 420,
+      height: "auto",
+      closeOnSubmit: true
+    });
+  }
+
+  getData() {
+    return { supportUrl: SUPPORT_URL };
+  }
+
+  async _updateObject() {}
+}
+
 function registerSettings() {
   game.settings.registerMenu(MODULE_ID, "access", {
     name: localize("PlayerPilot.settings.access.name"),
@@ -2844,6 +2879,15 @@ function registerSettings() {
     icon: "fas fa-mobile-screen-button",
     type: PlayerPilotAccessPanel,
     restricted: true
+  });
+
+  game.settings.registerMenu(MODULE_ID, "support", {
+    name: "Support Player Pilot",
+    label: "Open Patreon",
+    hint: "Open the Patreon link for supporting Player Pilot.",
+    icon: "fab fa-patreon",
+    type: PlayerPilotSupportPanel,
+    restricted: false
   });
 
   game.settings.register(MODULE_ID, "enabledUsers", {
@@ -2855,6 +2899,13 @@ function registerSettings() {
 
   game.settings.register(MODULE_ID, "lastActorId", {
     scope: "client",
+    config: false,
+    type: String,
+    default: ""
+  });
+
+  game.settings.register(MODULE_ID, "lastChangelogVersion", {
+    scope: "world",
     config: false,
     type: String,
     default: ""
@@ -2962,6 +3013,149 @@ function notifyPilotsToRefresh() {
 
 function sharedDocumentPopupsEnabled() {
   return setting("sharedDocumentPopups", true) !== false;
+}
+
+function moduleVersion() {
+  return String(game.modules?.get?.(MODULE_ID)?.version ?? game.data?.modules?.find?.((entry) => entry.id === MODULE_ID)?.version ?? "");
+}
+
+function isPrimaryActiveGm() {
+  if (!game.user?.isGM) return false;
+  const activeGms = asArray(game.users)
+    .filter((user) => user?.isGM && user?.active)
+    .sort((a, b) => String(a.id ?? "").localeCompare(String(b.id ?? "")));
+  return !activeGms.length || String(activeGms[0].id ?? "") === String(game.user.id ?? "");
+}
+
+function changelogSections(markdown = "") {
+  const sections = [];
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  let current = null;
+  for (const line of lines) {
+    const heading = line.trim().match(/^##\s+v?([^\s]+)\s*$/i);
+    if (heading) {
+      if (current) sections.push({ ...current, body: current.lines.join("\n").trim() });
+      current = { version: heading[1], lines: [] };
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  if (current) sections.push({ ...current, body: current.lines.join("\n").trim() });
+  return sections;
+}
+
+function changelogSection(markdown = "", version = moduleVersion()) {
+  const wanted = String(version ?? "").replace(/^v/i, "");
+  if (!wanted) return "";
+  return changelogSections(markdown).find((section) => String(section.version ?? "").replace(/^v/i, "") === wanted)?.body ?? "";
+}
+
+function safeChangelogUrl(url = "") {
+  const text = String(url ?? "").trim();
+  return /^(?:https?:|mailto:)/i.test(text) ? text : "";
+}
+
+function renderChangelogInlineMarkdown(text = "") {
+  const tokens = [];
+  const tokenFor = (html) => {
+    const token = `%%PPMD${tokens.length}%%`;
+    tokens.push([token, html]);
+    return token;
+  };
+  let source = String(text ?? "");
+  source = source.replace(/`([^`]+)`/g, (_match, code) => tokenFor(`<code>${escapeHtml(code)}</code>`));
+  source = source.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
+    const safeUrl = safeChangelogUrl(url);
+    if (!safeUrl) return match;
+    return tokenFor(`<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`);
+  });
+  let html = escapeHtml(source)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/~~([^~]+)~~/g, "<s>$1</s>");
+  for (const [token, replacement] of tokens) html = html.replaceAll(token, replacement);
+  return html;
+}
+
+function parseChangelogItems(markdown = "") {
+  const root = [];
+  const stack = [{ indent: -1, items: root }];
+  for (const line of String(markdown ?? "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const match = line.match(/^(\s*)[-*]\s+(.*)$/);
+    if (!match) {
+      const currentItems = stack[stack.length - 1]?.items ?? root;
+      const previous = currentItems[currentItems.length - 1] ?? root[root.length - 1];
+      if (previous) previous.text = `${previous.text} ${line.trim()}`;
+      continue;
+    }
+    const indent = match[1].replace(/\t/g, "  ").length;
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+    const item = { text: match[2], children: [] };
+    stack[stack.length - 1].items.push(item);
+    stack.push({ indent, items: item.children });
+  }
+  return root;
+}
+
+function renderChangelogItems(items = []) {
+  if (!items.length) return "";
+  return `<ul>${items.map((item) => `
+    <li>
+      ${renderChangelogInlineMarkdown(item.text)}
+      ${renderChangelogItems(item.children)}
+    </li>
+  `).join("")}</ul>`;
+}
+
+function renderChangelogList(markdown = "") {
+  const html = renderChangelogItems(parseChangelogItems(markdown));
+  return html || "<p>Player Pilot has been updated.</p>";
+}
+
+async function showGmChangelogOnce() {
+  if (!isPrimaryActiveGm()) return;
+  const version = moduleVersion();
+  if (!version || setting("lastChangelogVersion", "") === version) return;
+  let section = "";
+  let noticeVersion = version;
+  try {
+    const response = await fetch(`modules/${MODULE_ID}/CHANGELOG.md`, { cache: "no-store" });
+    if (response.ok) {
+      const markdown = await response.text();
+      section = changelogSection(markdown, version);
+      if (!section) {
+        const fallback = changelogSections(markdown)[0];
+        if (fallback?.body) {
+          console.warn(`Player Pilot changelog has no section for module version ${version}; showing v${fallback.version} instead.`);
+          section = fallback.body;
+          noticeVersion = String(fallback.version ?? version).replace(/^v/i, "");
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Player Pilot could not load CHANGELOG.md for the update notice.", err);
+  }
+  const content = `
+    <div class="player-pilot-changelog">
+      <h2>Player Pilot ${escapeHtml(noticeVersion)}</h2>
+      ${renderChangelogList(section)}
+      <hr>
+      <p><a href="${escapeHtml(SUPPORT_URL)}" target="_blank" rel="noopener">Please consider supporting Player Pilot so I can continue to improve it!</a></p>
+    </div>
+  `;
+  await ChatMessage.create({
+    speaker: ChatMessage.getSpeaker({ alias: "Player Pilot" }),
+    whisper: asArray(game.users).filter((user) => user.isGM).map((user) => user.id),
+    content,
+    flags: {
+      [MODULE_ID]: {
+        changelog: true,
+        version
+      }
+    }
+  });
+  await game.settings.set(MODULE_ID, "lastChangelogVersion", version);
 }
 
 async function enforceNoCanvasIfNeeded() {
@@ -3155,7 +3349,10 @@ function captureRenderState(shell) {
 function restoreRenderState(snapshot) {
   if (!state.shell || !snapshot) return;
   const body = state.shell.querySelector(".pp-body");
-  if (body) body.scrollTop = snapshot.scrollTop;
+  if (body) {
+    body.scrollTop = state.scrollBodyToTop ? 0 : snapshot.scrollTop;
+    state.scrollBodyToTop = false;
+  }
   if (snapshot.searchFocused) {
     const search = state.shell.querySelector(".pp-search");
     if (search instanceof HTMLInputElement) {
@@ -3187,6 +3384,7 @@ function renderShell() {
     ${renderTabs()}
     <main class="pp-body">
       ${renderActiveView(actor, model)}
+      ${renderSupportFooter()}
     </main>
     <button class="pp-scroll-top" type="button" data-action="scroll-top" aria-label="Scroll back to top" title="Back to top">
       <i class="fas fa-arrow-up"></i>
@@ -3209,7 +3407,16 @@ function renderNoActor() {
     </header>
     <main class="pp-body">
       <div class="pp-empty">Ask the GM to give your Foundry user owner permission on your character.</div>
+      ${renderSupportFooter()}
     </main>
+  `;
+}
+
+function renderSupportFooter() {
+  return `
+    <footer class="pp-support-footer">
+      <a href="${escapeHtml(SUPPORT_URL)}" target="_blank" rel="noopener">Support Player Pilot</a>
+    </footer>
   `;
 }
 
@@ -4202,14 +4409,14 @@ function renderSmartBadge(text) {
 
 function renderCheckCard(check) {
   const searchText = `${check.name} ${check.badge} ${check.formula ?? ""}`;
-  const formula = compactD20Formula(check.formula ?? "d20");
+  const mod = signedMod(parseD20Mod(check.formula ?? "d20"));
   return `
     <article class="pp-card pp-roll-card pp-searchable" data-search="${escapeHtml(searchText)}">
       ${renderInterfaceIcon(rollCardIcon(check), "pp-roll-type-icon")}
       <div class="pp-card-main">
         <div class="pp-card-title"><span>${escapeHtml(check.name)}</span></div>
         <div class="pp-roll-line">
-          <span><strong>${escapeHtml(formula)}</strong></span>
+          <span>${escapeHtml(check.badge || "Roll")} <strong>${escapeHtml(mod)}</strong></span>
           ${renderD20RollButton(check)}
         </div>
       </div>
@@ -4383,7 +4590,7 @@ function renderMapView(actor) {
   return `
     <section class="pp-view active">
       <div class="pp-dpad-wrap">
-        <div class="pp-section">
+        <div class="pp-section pp-movement-section">
           ${renderSectionHeader("Movement", "fa-person-running")}
           <div class="pp-dpad">
             <button class="up-left" type="button" data-action="move" data-dir="up-left" aria-label="Move up left"><i class="fas fa-arrow-up"></i></button>
@@ -4652,7 +4859,9 @@ async function handleDocumentClick(event) {
   }
 
   if (action === "tab") {
-    state.activeTab = actionEl.dataset.tab ?? "actions";
+    const nextTab = actionEl.dataset.tab ?? "actions";
+    state.scrollBodyToTop = nextTab !== state.activeTab;
+    state.activeTab = nextTab;
     state.search = "";
     state.navOpen = false;
     queueRender();
@@ -8868,6 +9077,7 @@ function registerHooks() {
     }
     installChatModeBridge();
     if (game.user?.isGM) installGmMapToggleButton();
+    await showGmChangelogOnce();
     await enforceNoCanvasIfNeeded();
     if (userIsPilot()) {
       installFoundryNotificationAutoClose();
