@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.15
+- Fixed Player Pilot movement so no-canvas clients validate movement on the GM canvas without showing GM-colored ruler paths.
+- Updated no-canvas movement results locally instead of forcing a full scene-state refresh after every movement step.
+- Made movement and Ping On Map snapshots prefer the token instance on the GM's viewed canvas level when duplicate actor tokens exist in one scene.
+- Taking a stab at the canvas loop issue.
+
 ## v0.2.14
 - Restored Rolls page check cards to show category labels such as Skill, Check, and Saving Throw with their modifier for consistent roll-card wording.
 - Added once-per-version GM changelog chat notice.
