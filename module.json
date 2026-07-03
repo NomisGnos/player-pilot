@@ -28,6 +28,14 @@
       "src": "styles/player-pilot.css"
     }
   ],
+  "flags": {
+    "hotReload": {
+      "extensions": [
+        "css",
+        "hbs"
+      ]
+    }
+  },
   "socket": true,
   "url": "https://github.com/NomisGnos/player-pilot",
   "manifest": "https://github.com/NomisGnos/player-pilot/releases/latest/download/module.json",

@@ -1,0 +1,104 @@
+<section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab 'stats')}}active{{/if}}" data-tab="stats">
+  <div class="pp-section">
+    {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionData.stats}}
+
+    {{!-- HP Bar --}}
+    <div class="pp-hp-panel pp-compact-card">
+      <div class="pp-hp-copy">
+        <span><i class="fas fa-heart-pulse"></i> HP</span>
+        <strong>{{hpData.label}}</strong>
+        {{#if hpData.temp}}<em>Temporary {{hpData.temp}}</em>{{/if}}
+      </div>
+      <div class="pp-hp-track" aria-label="Hit points">
+        <div class="pp-hp-fill" style="width:{{hpData.pct}}%"></div>
+        {{#if summary.hpTemp}}
+          <div class="pp-hp-temp" style="width:{{hpData.tempWidth}}%"></div>
+        {{/if}}
+      </div>
+      {{#if summary.hitDice}}
+        <div class="pp-hit-dice"><i class="fas fa-dice"></i><span>Hit Dice</span><strong>{{summary.hitDice}}</strong></div>
+      {{/if}}
+    </div>
+
+    <div class="pp-initiative-strip">
+      <i class="fas fa-flag-checkered"></i>
+      <span>Initiative Modifier</span>
+      <strong>{{summary.initiative}}</strong>
+      <button class="pp-initiative-roll" type="button" data-action="rollInitiative" title="{{initiativeRollText}}">
+        {{{d20Icon}}}
+      </button>
+    </div>
+
+    <div class="pp-status-grid">
+      {{#each statCards}}
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs" this}}
+      {{/each}}
+    </div>
+
+    <div class="pp-detail-strips">
+      {{#if (eq model.adapter.id "dnd5e")}}
+        <div class="pp-detail-strip pp-exhaustion-strip">
+          <i class="fas fa-triangle-exclamation"></i>
+          <span>Exhaustion</span>
+          <button type="button" data-action="exhaustion" data-delta="-1" title="Lower exhaustion"><i class="fas fa-minus"></i></button>
+          <strong>{{summary.exhaustionValue}}</strong>
+          <button type="button" data-action="exhaustion" data-delta="1" title="Raise exhaustion"><i class="fas fa-plus"></i></button>
+        </div>
+      {{/if}}
+
+      {{#if (eq model.adapter.id "pf2e")}}
+        <div class="pp-detail-strip pp-pf2e-resource-strip">
+          <i class="fas fa-star"></i>
+          <span>Hero Points</span>
+          <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="-1" title="Spend a Hero Point"><i class="fas fa-minus"></i></button>
+          <strong>{{summary.heroPointsValue}} / {{summary.heroPointsMax}}</strong>
+          <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="1" title="Gain a Hero Point"><i class="fas fa-plus"></i></button>
+        </div>
+        {{#if summary.focusMax}}
+          <div class="pp-detail-strip pp-pf2e-resource-strip">
+            <i class="fas fa-bullseye"></i>
+            <span>Focus Points</span>
+            <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="-1" title="Spend a Focus Point"><i class="fas fa-minus"></i></button>
+            <strong>${escapeHtml(summary.focusValue ?? 0)} / ${escapeHtml(summary.focusMax ?? 0)}</strong>
+            <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="1" title="Recover a Focus Point"><i class="fas fa-plus"></i></button>
+          </div>
+        {{else}}
+          <div class="pp-pf2e-condition-panel">
+            <div class="pp-pf2e-condition-values">
+              <span title="At your maximum Dying value, your character dies."><i class="fas fa-heart-crack"></i><b>Dying</b><strong>${escapeHtml(summary.dyingValue ?? 0)} / ${escapeHtml(summary.dyingMax ?? 4)}</strong></span>
+              <span title="When you recover from Dying, Wounded increases and affects the next time you gain Dying."><i class="fas fa-bandage"></i><b>Wounded</b><strong>${escapeHtml(summary.woundedValue ?? 0)} / ${escapeHtml(summary.woundedMax ?? 3)}</strong></span>
+              <span title="Doomed lowers your maximum Dying value."><i class="fas fa-skull"></i><b>Doomed</b><strong>${escapeHtml(summary.doomedValue ?? 0)} / ${escapeHtml(summary.doomedMax ?? 4)}</strong></span>
+            </div>
+            <button class="pp-action-btn" type="button" data-action="roll-check" data-kind="recovery" data-key="recovery" title="${Number(summary.dyingValue ?? 0) > 0 ? `Roll a DC ${escapeHtml(summary.recoveryDc ?? 10)} recovery check` : " Recovery checks are only rolled while Dying"}" ${Number(summary.dyingValue ?? 0)> 0 ? "" : "disabled"}>
+              Recovery Check{{#if summary.dyingValue}}(DC {{summary.recoveryDc}}){{/if}}
+            </button>
+            <small>These values mirror PF2e conditions. Recovery checks are available only while Dying.</small>
+          </div>
+        {{/if}}
+      {{/if}}
+    </div>
+
+    <div class="pp-ability-grid">
+      {{#each summary.abilities}}
+        <div class="pp-ability-score">
+          <span class="pp-ability-label"><i class="fas {{icon}}"></i><span>{{label}}</span></span>
+          <strong>{{score}}</strong>
+          <em><small>Modifier</small>{{mod}}</em>
+        </div>
+      {{/each}}
+    </div>
+
+    {{#if (eq model.adapter.id "pf2e")}}
+      <div class="pp-rest-row">
+        <button class="pp-button" type="button" data-action="rest" data-rest="night">Rest for the Night</button>
+      </div>
+    {{/if}}
+
+    {{#if (eq model.adapter.id "dnd5e")}}
+      <div class="pp-rest-row">
+        <button class="pp-button" type="button" data-action="rest" data-rest="short">Short Rest</button>
+        <button class="pp-button" type="button" data-action="rest" data-rest="long">Long Rest</button>
+      </div>
+    {{/if}}
+  </div>
+</section>

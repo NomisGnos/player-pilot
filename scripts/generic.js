@@ -609,3 +609,21 @@ export function itemTargetInfo(item, activityId = "") {
     hasAreaTemplate
   };
 }
+
+export function abilityDisplayIcon(key) {
+  return ({
+    str: "fa-dumbbell",
+    strength: "fa-dumbbell",
+    dex: "fa-person-running",
+    dexterity: "fa-person-running",
+    con: "fa-heart-pulse",
+    constitution: "fa-heart-pulse",
+    int: "fa-brain",
+    intelligence: "fa-brain",
+    wis: "fa-eye",
+    wisdom: "fa-eye",
+    cha: "fa-masks-theater",
+    charisma: "fa-masks-theater",
+    perception: "fa-binoculars"
+  })[String(key ?? "").toLowerCase()] ?? "fa-circle";
+}

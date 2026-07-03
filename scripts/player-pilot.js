@@ -2,6 +2,7 @@ import { DND5E_ABILITIES, DND5E_ADAPTER, actorConcentrationEffects, applyPending
 import {
   CURRENCY_LABELS,
   GENERIC_ADAPTER,
+  abilityDisplayIcon,
   activitySystem,
   getItemActivities,
   getItemRangeFeet,
@@ -30,6 +31,7 @@ import {
   pf2eSpellcastingEntry,
   pf2eTraits
 } from "./pf2e.js";
+import { PlayerPilotShell } from "./player-pilot-shell.js";
 import {
   asArray,
   capitalizeWords,
@@ -55,7 +57,7 @@ const CORE_ICON_ROOT = "icons/svg";
 const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
 const GM_MAP_TOGGLE_POSITION_KEY = `${MODULE_ID}.gmMapTogglePosition`;
-const SUPPORT_URL = "https://www.patreon.com/cw/nomisDM";
+export const SUPPORT_URL = "https://www.patreon.com/cw/nomisDM";
 const BOOT_MIN_VISIBLE_MS = 1800;
 const BOOT_READY_HOLD_MS = 1200;
 const BOOT_PROGRESS_INTERVAL_MS = 250;
@@ -113,13 +115,13 @@ function currentSystemId() {
   return String(globalThis.game?.system?.id ?? "").toLowerCase();
 }
 
-function renderDieGlyph(sides, extraClass = "") {
+export function renderDieGlyph(sides, extraClass = "") {
   const die = String(sides ?? "").replace(/\D/g, "");
   const classes = ["pp-die-glyph", String(extraClass ?? "").trim()].filter(Boolean).join(" ");
   return `<img class="${escapeHtml(classes)}" src="${escapeHtml(`${GAME_ICON_DICE_ROOT}/d${die}.svg`)}" alt="" aria-hidden="true">`;
 }
 
-function renderInterfaceIcon(icon, extraClass = "") {
+export function renderInterfaceIcon(icon, extraClass = "") {
   if (icon === "pp-die-d20") return renderDieGlyph(20, extraClass);
   const classes = ["fas", String(icon ?? ""), String(extraClass ?? "")].filter(Boolean).join(" ");
   return `<i class="${escapeHtml(classes)}" aria-hidden="true"></i>`;
@@ -433,7 +435,7 @@ if (initialUser) {
   }
 }
 
-const TABS = [
+export const TABS = [
   ["stats", "Details", "fa-chart-simple"],
   ["actions", "Actions", "fa-bolt"],
   ["rolls", "Rolls", "pp-die-d20"],
@@ -443,7 +445,7 @@ const TABS = [
   ["map", "Controls", "fa-gamepad"]
 ];
 
-const state = {
+export const state = {
   shell: null,
   actorId: "",
   activeTab: "actions",
@@ -512,7 +514,7 @@ const BLOCKED_WHILE_PAUSED = new Set([
   "pf2e-item-roll"
 ]);
 
-function setting(key, fallback = null) {
+export function setting(key, fallback = null) {
   try {
     const value = game.settings.get(MODULE_ID, key);
     return value === undefined ? fallback : value;
@@ -914,7 +916,7 @@ function actorModelSignature(actor) {
   return `${actor?.id ?? ""}:${actorStamp}:${itemStamps}`;
 }
 
-function cachedModel(actor) {
+export function cachedModel(actor) {
   const signature = actorModelSignature(actor);
   if (state.modelCache?.signature === signature && state.modelCache?.actorId === String(actor?.id ?? "")) {
     return state.modelCache.model;
@@ -1118,6 +1120,30 @@ function registerSettings() {
     type: Boolean,
     default: false
   });
+}
+
+async function loadTemplates() {
+  await foundry.applications.handlebars.loadTemplates([
+    "modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/stats-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/actions-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/rolls-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/spells-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/features-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/item-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/map-view.hbs",
+  ]);
+}
+
+async function registerHandlebarsHelpers() {
+  Handlebars.registerHelper(`renderInterfaceIcon`, renderInterfaceIcon);
+  Handlebars.registerHelper(`renderActionsView`, renderActionsView);
+  Handlebars.registerHelper(`renderRollsView`, renderRollsView);
+  Handlebars.registerHelper(`renderSpellsView`, renderSpellsView);
+  Handlebars.registerHelper(`renderFeaturesView`, renderFeaturesView);
+  Handlebars.registerHelper(`renderItemView`, renderItemView);
+  Handlebars.registerHelper(`renderMapView`, renderMapView);
 }
 
 function notifyPilotsToRefresh() {
@@ -1346,23 +1372,18 @@ function applySharedDocumentPopupMode() {
 
 function mountPilotShell() {
   applySharedDocumentPopupMode();
-  if (state.shell?.isConnected) return;
-  state.shell?.remove?.();
-  state.shell = null;
-  document.body.classList.add("player-pilot-active");
-  state.shell = document.createElement("section");
-  state.shell.className = "player-pilot-shell";
-  state.shell.setAttribute("aria-label", "Player Pilot");
-  document.body.appendChild(state.shell);
+  if (state.shell) return;
+  state.shell = new PlayerPilotShell();
+  //state.shell.setAttribute("aria-label", "Player Pilot");
   bindShellEvents();
   requestSceneState();
   queueRender();
 }
 
 function pilotShellIsPainted() {
-  const shell = state.shell;
+  const shell = state.shell?.element;
   const topbar = shell?.querySelector?.('.pp-topbar');
-  if (!(shell instanceof HTMLElement) || !(topbar instanceof HTMLElement) || !shell.isConnected) return false;
+  if (!(shell instanceof HTMLElement) || !(topbar instanceof HTMLElement)) return false;
   const style = window.getComputedStyle?.(shell);
   if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) return false;
   const shellRect = shell.getBoundingClientRect();
@@ -1379,7 +1400,7 @@ function revealPilotShell() {
       removeBootScreen();
       return;
     }
-    if (!state.shell?.isConnected || !state.shell.querySelector('.pp-topbar')) {
+    if (!state.shell?.element.querySelector('.pp-topbar')) {
       try {
         mountPilotShell();
         renderShell();
@@ -1427,7 +1448,7 @@ function unmountPilotShell() {
   document.body.classList.remove("player-pilot-shared-popups");
   document.body.classList.remove("player-pilot-shared-popups-disabled");
   removeBootScreen();
-  state.shell?.remove();
+  state.shell?.close();
   state.shell = null;
   state.sharedImage?.remove?.();
   state.sharedImage = null;
@@ -1442,8 +1463,8 @@ function queueRender() {
   if (!state.shell || state.renderQueued) return;
   state.renderQueued = true;
   window.requestAnimationFrame(() => {
-    state.renderQueued = false;
     renderShell();
+    state.renderQueued = false;
   });
 }
 
@@ -1462,13 +1483,13 @@ function captureRenderState(shell) {
 
 function restoreRenderState(snapshot) {
   if (!state.shell || !snapshot) return;
-  const body = state.shell.querySelector(".pp-body");
+  const body = state.shell.element.querySelector(".pp-body");
   if (body) {
     body.scrollTop = state.scrollBodyToTop ? 0 : snapshot.scrollTop;
     state.scrollBodyToTop = false;
   }
   if (snapshot.searchFocused) {
-    const search = state.shell.querySelector(".pp-search");
+    const search = state.shell.element.querySelector(".pp-search");
     if (search instanceof HTMLInputElement) {
       search.value = snapshot.searchValue;
       search.focus({ preventScroll: true });
@@ -1480,8 +1501,11 @@ function restoreRenderState(snapshot) {
   }
 }
 
-function renderShell() {
-  const shell = state.shell;
+async function renderShell() {
+  await state.shell.render(true);
+  const style = window.getComputedStyle?.(state.shell.element);
+  return;
+  //const shell = state.shell;
   if (!shell) return;
   const snapshot = captureRenderState(shell);
   const actor = currentActor();
@@ -1493,7 +1517,7 @@ function renderShell() {
   const model = cachedModel(actor);
   shell.classList.toggle("pp-paused", !!game.paused);
   shell.innerHTML = `
-    ${renderHeader(actor, model)}
+    ${await renderHeader(actor, model)}
     <div class="pp-banner">Game paused</div>
     ${renderTabs()}
     <main class="pp-body">
@@ -1576,7 +1600,7 @@ function renderAbilityScores(summary = {}) {
     <div class="pp-ability-grid">
       ${abilities.map((ability) => `
         <div class="pp-ability-score">
-          <span class="pp-ability-label"><i class="fas ${escapeHtml(abilityDisplayIcon(ability.key))}"></i><span>${escapeHtml(ability.label)}</span></span>
+          <span class="pp-ability-label"><i class="fas ${escapeHtml(ability.icon)}"></i><span>${escapeHtml(ability.label)}</span></span>
           <strong>${escapeHtml(ability.score ?? "-")}</strong>
           <em><small>Modifier</small>${escapeHtml(ability.mod ?? "+0")}</em>
         </div>
@@ -1585,49 +1609,18 @@ function renderAbilityScores(summary = {}) {
   `;
 }
 
-function abilityDisplayIcon(key) {
-  return ({
-    str: "fa-dumbbell",
-    strength: "fa-dumbbell",
-    dex: "fa-person-running",
-    dexterity: "fa-person-running",
-    con: "fa-heart-pulse",
-    constitution: "fa-heart-pulse",
-    int: "fa-brain",
-    intelligence: "fa-brain",
-    wis: "fa-eye",
-    wisdom: "fa-eye",
-    cha: "fa-masks-theater",
-    charisma: "fa-masks-theater",
-    perception: "fa-binoculars"
-  })[String(key ?? "").toLowerCase()] ?? "fa-circle";
-}
-
-function renderHeader(actor, model) {
+async function renderHeader(actor, model) {
   const actors = getOwnedActors();
   const summary = model.summary;
-  return `
-    <header class="pp-topbar">
-      <button class="pp-identity-block" type="button" data-action="toggle-stats" title="Open details">
-        <span class="pp-portrait" style="background-image:url('${escapeHtml(summary.img)}')"></span>
-        <span class="pp-title">
-          <span class="pp-title-name">${escapeHtml(summary.name)}</span>
-          <small>${escapeHtml(model.adapter.label)}${state.scene?.name ? ` - ${escapeHtml(state.scene.name)}` : ""}</small>
-        </span>
-      </button>
-      <div class="pp-top-actions">
-        <button class="pp-icon-btn" type="button" data-action="toggle-nav" title="Menu"><i class="fas fa-bars"></i></button>
-        <button class="pp-icon-btn" type="button" data-action="refresh" title="Refresh"><i class="fas fa-rotate"></i></button>
-      </div>
-    </header>
-    ${actors.length > 1 ? `
-      <section style="padding:8px 12px;background:#11161b;border-bottom:1px solid var(--pp-line);">
-        <select class="pp-actor-picker" data-action="actor-select">
-          ${actors.map((entry) => `<option value="${escapeHtml(entry.id)}" ${entry.id === actor.id ? "selected" : ""}>${escapeHtml(entry.name)}</option>`).join("")}
-        </select>
-      </section>
-    ` : ""}
-  `;
+  const data = {
+    showActorSelect: actors.length > 1,
+    ownedActors: actors,
+    currentActor: actor,
+    summary,
+    model
+  };
+  const content = await foundry.applications.handlebars.renderTemplate("modules/player-pilot/templates/player-pilot-shell/body.hbs", data);
+  return content;
 }
 
 function renderTabs() {
@@ -2183,7 +2176,8 @@ function renderCheckGroups(checks = []) {
       key,
       label,
       check: abilityChecks.find((entry) => entry.key === key),
-      save: abilitySaves.find((entry) => entry.key === key)
+      save: abilitySaves.find((entry) => entry.key === key),
+      icon: abilityDisplayIcon(key),
     })).filter((entry) => entry.check || entry.save)
     : [];
   const buckets = [
@@ -2534,7 +2528,7 @@ function renderAbilityRollCard(entry) {
   const searchText = `${entry.label} check saving throw ${entry.check?.formula ?? ""} ${entry.save?.formula ?? ""}`;
   return `
     <article class="pp-card pp-roll-card pp-ability-roll-card pp-searchable" data-search="${escapeHtml(searchText)}">
-      <i class="fas ${escapeHtml(abilityDisplayIcon(entry.key))} pp-roll-type-icon" aria-hidden="true"></i>
+      <i class="fas ${escapeHtml(entry.icon)} pp-roll-type-icon" aria-hidden="true"></i>
       <div class="pp-card-main">
         <div class="pp-card-title"><span>${escapeHtml(entry.label)}</span></div>
         ${entry.check ? renderAbilityRollLine("Check", entry.check) : ""}
@@ -2773,8 +2767,8 @@ function handleDocumentScroll(event) {
   updateScrollTopButton(target);
 }
 
-function updateScrollTopButton(body = state.shell?.querySelector(".pp-body")) {
-  const button = state.shell?.querySelector(".pp-scroll-top");
+function updateScrollTopButton(body = state.shell?.element.querySelector(".pp-body")) {
+  const button = state.shell?.element.querySelector(".pp-scroll-top");
   if (!(button instanceof HTMLElement)) return;
   button.classList.toggle("visible", Number(body?.scrollTop ?? 0) > 280);
 }
@@ -2793,7 +2787,7 @@ function handleWheel(event) {
   if (isInShell(target)) markPilotInteracting();
 }
 
-function setMapTransform(map = state.shell?.querySelector(".pp-map-img")) {
+function setMapTransform(map = state.shell?.element.querySelector(".pp-map-img")) {
   if (!(map instanceof HTMLElement)) return;
   map.style.setProperty("--pp-map-zoom", `${state.mapZoom}`);
   map.style.setProperty("--pp-map-pan-x", `${state.mapPanX}px`);
@@ -2894,7 +2888,7 @@ function handlePointerUp(event) {
 }
 
 function isInShell(target) {
-  return !!state.shell && target instanceof Node && state.shell.contains(target);
+  return !!state.shell && target instanceof Node && state.shell.element.contains(target);
 }
 
 function handleDocumentInput(event) {
@@ -2920,7 +2914,7 @@ function shouldDelaySceneRender() {
 
 function applySearchFilter() {
   const q = state.search.trim().toLowerCase();
-  const shell = state.shell;
+  const shell = state.shell.element;
   if (!shell) return;
   shell.querySelectorAll(".pp-searchable").forEach((card) => {
     if (!(card instanceof HTMLElement)) return;
@@ -2951,6 +2945,9 @@ async function handleDocumentClick(event) {
   const actionEl = target.closest("[data-action]");
   if (!(actionEl instanceof HTMLElement)) return;
   const action = actionEl.dataset.action;
+  if (Object.keys(state.shell.options.actions).includes(action)) {
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
 
@@ -3001,7 +2998,7 @@ async function handleDocumentClick(event) {
   }
   if (action === "search-clear") {
     state.search = "";
-    state.shell?.querySelectorAll(".pp-search").forEach((input) => {
+    state.shell?.element.querySelectorAll(".pp-search").forEach((input) => {
       if (input instanceof HTMLInputElement) input.value = "";
     });
     if (document.activeElement instanceof HTMLInputElement && document.activeElement.classList.contains("pp-search")) {
@@ -3012,7 +3009,7 @@ async function handleDocumentClick(event) {
     return;
   }
   if (action === "scroll-top") {
-    const body = state.shell?.querySelector(".pp-body");
+    const body = state.shell?.element.querySelector(".pp-body");
     body?.scrollTo?.({ top: 0, behavior: "smooth" });
     return;
   }
@@ -4938,7 +4935,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   if (uiOptions.showReminder !== false) openRollReminderDialog(item, actor, options);
 }
 
-async function rollCheck(kind, key) {
+export async function rollCheck(kind, key) {
   if (pilotPaused()) {
     warnPaused();
     return;
@@ -5224,7 +5221,7 @@ async function togglePrepared(itemId) {
   queueRender();
 }
 
-async function updateExhaustion(delta) {
+export async function updateExhaustion(delta) {
   const actor = currentActor();
   if (!actor || !Number.isFinite(delta) || delta === 0) return;
   const current = readExhaustionValue(actor);
@@ -5301,7 +5298,7 @@ async function updateDeathSaves(kind) {
   }
 }
 
-async function requestRest(restType) {
+export async function requestRest(restType) {
   const actor = currentActor();
   if (!actor) return;
   if (setting("combatTurnLock", false) === true && !actorHasActiveTurn(actor)) {
@@ -7142,7 +7139,8 @@ function registerHooks() {
   Hooks.on("closeApplicationV2", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.on("renderDialog", surfacePilotPrompt);
   Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
-  Hooks.once("init", () => {
+  Hooks.once("init", async () => {
+    await loadTemplates();
     registerSettings();
     const activePilot = earlyUserIsPilot();
     syncManagedNoCanvas(activePilot && setting('useNoCanvas', true) === true);
@@ -7168,6 +7166,7 @@ function registerHooks() {
     mountPilotShell();
   });
   Hooks.once("ready", async () => {
+    registerHandlebarsHelpers();
     updateBootBranding();
     if (userIsPilot()) setBootStage(90, "Finishing character data...", 95);
     game.socket?.on?.(SOCKET, handleSocket);

@@ -1,6 +1,7 @@
 import {
   CURRENCY_LABELS,
   GENERIC_ADAPTER,
+  abilityDisplayIcon,
   itemIsEquipped,
   itemIsFeatureType,
   itemUsesText,
@@ -225,7 +226,8 @@ export function pf2eAbilityScores(actor) {
     key,
     label: localizedFieldLabel(data?.label ?? globalThis.CONFIG?.PF2E?.abilities?.[key], key),
     score: numberText(data?.value ?? data?.score),
-    mod: signedMod(data?.mod ?? data?.modifier ?? 0)
+    mod: signedMod(data?.mod ?? data?.modifier ?? 0),
+    icon: abilityDisplayIcon(key),
   }));
 }
 

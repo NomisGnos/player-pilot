@@ -1,5 +1,6 @@
 import {
   GENERIC_ADAPTER,
+  abilityDisplayIcon,
   isConcentrationEffect,
   itemBelongsInActions,
   itemIsFeatureType,
@@ -346,7 +347,8 @@ export function dndAbilityScores(actor) {
     key,
     label,
     score: numberText(abilities?.[key]?.value),
-    mod: signedMod(abilities?.[key]?.mod)
+    mod: signedMod(abilities?.[key]?.mod),
+    icon: abilityDisplayIcon(key),
   }));
 }
 
