@@ -1,0 +1,25 @@
+<main class="pp-body">
+    <section class="pp-view pp-stats-page pp-system-swade tab {{#if (eq activeTab.key 'skills')}}active{{/if}}" data-tab="skills">
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search skills..."}}
+
+        <div class="pp-section">
+            {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.adapter.label}}
+
+            <div class="pp-card-list">
+                {{#each model.groups.skills as |skill|}}
+                    <article class="pp-card pp-swade-skill-card pp-searchable" data-search="{{skill.name}} {{skill.attribute}}">
+                        <img src="{{skill.img}}">
+                        <div class="pp-card-title">
+                            <span>{{skill.name}}</span>
+                            <hr>
+                            <span class="pp-linked-attribute">{{skill.attribute}}</span>
+                        </div>
+                        <button class="pp-roll-skill-btn" type="button" data-action="swadeRoll" data-kind="skill" data-key="{{skill.key}}" title="Roll {{skill.name}}">
+                            <div class="pp-swade-die-group">{{{skill.die}}}<span>{{skill.mod}}</span></div>
+                        </button>
+                    </article>
+                {{/each}}
+            </div>
+        </div>
+    </section>
+</main>

@@ -2960,6 +2960,42 @@ button.pp-card-img.pp-card-info-btn {
   outline-offset: 1px;
 }
 
+.pp-swade-skill-card {
+  grid-template-columns: 42px minmax(0, 2fr) 1fr;
+  align-items: start;
+}
+
+.pp-swade-skill-card img {
+  align-self: center;
+}
+
+.pp-swade-skill-card .pp-card-title {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.pp-swade-skill-card .pp-card-title hr {
+  margin: 0;
+  background-image: linear-gradient(90deg, transparent 0%, var(--pp-text) 50%, transparent 100%);
+  color: 1px solid var(--pp-text);
+}
+
+.pp-linked-attribute {
+  font-style: italic;
+}
+
+.pp-roll-skill-btn {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.5rem;
+  color: var(--pp-text);
+}
+
 .pp-cast-level-static,
 .pp-cast-preview {
   display: grid;

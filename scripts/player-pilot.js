@@ -1130,18 +1130,6 @@ async function loadTemplates() {
     "modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/actions-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/features-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/item-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/map-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/no-player-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/rolls-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/spells-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/stats-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/dnd5e/stats-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/pf2e/stats-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/swade/powers-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/swade/stats-view.hbs",
   ];
 
   await foundry.applications.handlebars.loadTemplates(templates);

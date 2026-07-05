@@ -117,9 +117,8 @@ export const SWADE_ADAPTER = {
   groups(actor) {
     const items = asArray(actor?.items).map((item) => normalizeSwadeItem(item, item.type || "items"));
     return {
-      actions: items.filter(itemBelongsInActions),
-      skills: items.filter(i => i.type === "skill"),
-      powers: items.filter((item) => item.type === "power"),
+      actions: items.filter(itemBelongsInActions).sort((a, b) => a.name.localeCompare(b.name)),
+      skills: items.filter(i => i.type === "skill").sort((a, b) => a.name.localeCompare(b.name)),
       inventory: items.filter(isInventoryItem),
     };
   },
@@ -205,7 +204,13 @@ export const SWADE_ADAPTER = {
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/stats-view.hbs",
     },
     { key: "actions" },
-    { key: "rolls" },
+    {
+      key: "skills",
+      label: "Skills",
+      icon: "fa-hand-sparkles",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/skills-view.hbs",
+      sectionHeader: { title: "Skills", icon: renderInterfaceIcon("fa-hand-sparkles") },
+    },
     {
       key: "powers",
       label: "Powers",
@@ -294,8 +299,16 @@ export function normalizeSwadeItem(item, group = "items") {
   normalized.equipped = itemIsEquipped(item);
   normalized.equipStatus = item.system.equipStatus;
   normalized.badges = swadeItemBadges(item);
+
   if (item.type === "power") {
     normalized.arcane = item.system.arcane;
+  }
+
+  if (item.type === "skill") {
+    normalized.die = renderDieGlyph(item.system.die.sides, "pp-swade-die");
+    normalized.mod = item.system.die.modifier < 0 ? String(item.system.die.modifier) : `+${item.system.die.modifier}`;
+    normalized.img = item.img;
+    normalized.attribute = capitalizeWords(item.system.attribute);
   }
   return normalized;
 }
