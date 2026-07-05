@@ -1,3 +1,5 @@
-<section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab 'actions')}}active{{/if}}" data-tab="actions">
-    {{{renderActionsView model}}}
-</section>
+<main class="pp-body">
+    <section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab.key 'actions')}}active{{/if}}" data-tab="actions">
+        {{{renderActionsView model}}}
+    </section>
+</main>

@@ -203,3 +203,15 @@ export function cleanRulesText(value) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+export function mergeTabs(baseTabs, overrideTabs) {
+  const baseMap = new Map(baseTabs.map(t => [t.key, foundry.utils.deepClone(t)]));
+  return overrideTabs.map(override => {
+    const base = baseMap.get(override.key);
+    if (!base) {
+      return foundry.utils.deepClone(override);
+    }
+
+    return foundry.utils.mergeObject(override, base, { overwrite: false });
+  });
+}

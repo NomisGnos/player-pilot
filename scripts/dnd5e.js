@@ -10,9 +10,19 @@ import {
   selectedItemActivity
 } from "./generic.js";
 import {
+  actorHasActiveTurn,
+  addLog,
+  executePlayerFirst,
+  invalidateModelCache,
+  queueRender,
+  setting
+} from "./player-pilot.js";
+import {
   asArray,
+  capitalizeWords,
   d20Formula,
   fieldText,
+  mergeTabs,
   numberText,
   signedMod
 } from "./utils.js";
@@ -61,10 +71,13 @@ export const DND5E_ADAPTER = {
       name: actor?.name ?? "Actor",
       type: actor?.type ?? "",
       img: actor?.img ?? "icons/svg/mystery-man.svg",
-      hp: `${numberText(hp.value)} / ${numberText(hp.max)}`,
-      hpValue: Number(hp.value ?? 0),
-      hpMax: Number(hp.max ?? 0),
-      hpTemp: Number(hp.temp ?? hp.temporary ?? 0),
+      hp: {
+        display: `${numberText(hp.value)} / ${numberText(hp.max)}`,
+        value: hp.value,
+        max: hp.max,
+        temp: hp.temporary,
+        pct: hp.max > 0 ? (hp.value / hp.max) * 100 : 0,
+      },
       hitDice: dndHitDiceText(actor),
       ac: numberText(system.attributes?.ac?.value),
       speed: walk || "-",
@@ -231,7 +244,27 @@ export const DND5E_ADAPTER = {
       if (await rollActorEntry(entry?.save ?? entry?.savingThrow ?? entry)) return;
     }
     return GENERIC_ADAPTER.rollCheck(actor, kind, key);
-  }
+  },
+  TABS: mergeTabs(GENERIC_ADAPTER.TABS, [
+    {
+      key: "stats",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dnd5e/stats-view.hbs",
+    },
+    { key: "actions" },
+    { key: "rolls" },
+    { key: "spells" },
+    { key: "inventory" },
+    { key: "map" },
+  ]),
+};
+
+export const DND5E_ACTIONS = {
+  exhaustion: async function (event, button) {
+    await updateExhaustion(Number(button.dataset.delta ?? 0));
+  },
+  dnd5eRest: async function (event, button) {
+    await requestRest(this.currentActor, button.dataset.rest);
+  },
 };
 
 const pendingCastLevels = globalThis.__PLAYER_PILOT_PENDING_CAST_LEVELS__ ?? (globalThis.__PLAYER_PILOT_PENDING_CAST_LEVELS__ = []);
@@ -444,9 +477,59 @@ export function concentrationEffectLabel(actor, effect) {
   return effectName.replace(/^concentrat(?:ing|ion)\s*:\s*/i, "") || "an active spell";
 }
 
-export function readExhaustionValue(actor) {
+function readExhaustionValue(actor) {
   const raw = actor?._source?.system?.attributes?.exhaustion ?? actor?.system?.attributes?.exhaustion;
   const value = typeof raw === "object" && raw !== null ? raw.value : raw;
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function exhaustionUpdateData(actor, value) {
+  const raw = actor?.system?.attributes?.exhaustion;
+  if (typeof raw === "object" && raw !== null && Object.prototype.hasOwnProperty.call(raw, "value")) {
+    return { "system.attributes.exhaustion.value": value };
+  }
+  return { "system.attributes.exhaustion": value };
+}
+
+async function updateExhaustion(delta) {
+  const actor = currentActor();
+  if (!actor || !Number.isFinite(delta) || delta === 0) return;
+  const current = readExhaustionValue(actor);
+  const next = clamp(current + delta, 0, 6);
+  const updated = await executePlayerFirst(
+    `Exhaustion ${next}`,
+    async () => actor.update(exhaustionUpdateData(actor, next)),
+    "updateActorData",
+    { actorId: actor.id, updates: exhaustionUpdateData(actor, next), label: `Exhaustion ${next}` }
+  );
+  if (updated) {
+    invalidateModelCache();
+    queueRender();
+    window.setTimeout(() => {
+      invalidateModelCache();
+      queueRender();
+    }, 250);
+  }
+}
+
+async function requestRest(actor, restType) {
+  if (!actor) return;
+  if (setting("combatTurnLock", false) === true && !actorHasActiveTurn(actor)) {
+    ui.notifications?.warn?.("It is not this actor's turn.");
+    addLog("Turn locked");
+    return;
+  }
+
+  const normalized = String(restType).toLowerCase() === "long" ? "long" : "short";
+  await executePlayerFirst(
+    `${capitalizeWords(normalized)} rest`,
+    async () => {
+      if (normalized === "long" && typeof actor.longRest === "function") return actor.longRest({ dialog: true, chat: true });
+      if (normalized === "short" && typeof actor.shortRest === "function") return actor.shortRest({ dialog: true, chat: true });
+      throw new Error("Rest method not available locally.");
+    },
+    "rest",
+    { actorId: actor.id, restType: normalized }
+  );
 }

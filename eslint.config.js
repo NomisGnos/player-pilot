@@ -38,6 +38,7 @@ export default [
                 Application: "readonly",
                 FormApplication: "readonly",
                 TextEditor: "readonly",
+                Handlebars: "readonly",
 
                 // Utilities / constants
                 CONST: "readonly",

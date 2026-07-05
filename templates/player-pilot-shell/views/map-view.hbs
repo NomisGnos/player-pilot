@@ -1,3 +1,5 @@
-<section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab 'map')}}active{{/if}}" data-tab="map">
-    {{{renderMapView model}}}
-</section>
+<main class="pp-body">
+    <section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab.key 'map')}}active{{/if}}" data-tab="map">
+        {{{renderMapView model}}}
+    </section>
+</main>

@@ -1,6 +1,8 @@
+import { filterItemsForView, renderInterfaceIcon, setting, state } from "./player-pilot.js";
 import {
   asArray,
   capitalizeWords,
+  clamp,
   cleanRulesText,
   escapeHtml,
   fieldText,
@@ -26,10 +28,14 @@ export const GENERIC_ADAPTER = {
       name: actor?.name ?? "Actor",
       type: actor?.type ?? "",
       img: actor?.img ?? "icons/svg/mystery-man.svg",
-      hp: `${numberText(hp.value)} / ${numberText(hp.max)}`,
-      hpValue: Number(hp.value ?? 0),
-      hpMax: Number(hp.max ?? 0),
-      hpTemp: Number(hp.temp ?? hp.temporary ?? 0),
+      hp: {
+        display: `${numberText(hp.value)} / ${numberText(hp.max)}`,
+        value: hp.value,
+        max: hp.max,
+        temp: hp.temp,
+        tempWidth: clamp((hp.temp / Math.max(hp.max || hp.temp, 1)) * 100, 5, 100),
+        pct: hp.max > 0 ? (hp.value / hp.max) * 100 : 0,
+      },
       ac: numberText(system.attributes?.ac?.value ?? system.ac?.value ?? system.ac),
       speed: fieldText(system.attributes?.movement?.walk, system.speed?.value, system.speed) || "-",
       initiative: signedMod(system.attributes?.init?.total ?? system.attributes?.init?.mod ?? 0),
@@ -65,7 +71,86 @@ export const GENERIC_ADAPTER = {
       speaker: ChatMessage.getSpeaker({ actor }),
       content: `<p><strong>${escapeHtml(actor.name)}</strong> requested ${escapeHtml(kind)} ${escapeHtml(key)}.</p>`
     });
-  }
+  },
+  statCards(model) {
+    if (!model) return [];
+    return [
+      { key: "ac", icon: "fa-shield-halved", label: "Armor Class", value: model.summary.ac },
+      { key: "speed", icon: "fa-person-running", label: "Speed", value: model.summary.speed },
+      { key: "level", icon: "fa-star", label: "Level", value: model.summary.level ?? model.summary.resource ?? "-" },
+      {
+        key: "prof",
+        icon: "pp-die-d20",
+        label: model.adapter.id === "pf2e" ? "Modifiers" : (model.adapter.id === "dnd5e" ? "Proficiency" : "System"),
+        value: model.summary.prof ?? model.summary.resource ?? "-"
+      },
+    ];
+  },
+  inventoryGroups(model) {
+    const items = filterItemsForView("inventory", model.groups.inventory);
+    const groups = new Map();
+    for (const item of items) {
+      const key = item.containerName || (item.type === "backpack" ? item.name : "Carried");
+      if (!groups.has(key)) {
+        groups.set(key, {
+          name: key,
+          icon: key === "Carried" ? "fas fa-hand" : "fas fa-box-open",
+          count: 0,
+          items: [],
+        });
+      }
+
+      const group = groups.get(key);
+      group.items.push(item);
+      group.count = group.items.length;
+    }
+
+    const sortedGroups = [...groups.values()];
+    sortedGroups.forEach(g => g.items.sort((a, b) => {
+      return a.name.localeCompare(b.name);
+    }));
+    return sortedGroups;
+  },
+  TABS: [
+    {
+      key: "stats",
+      label: "Details",
+      icon: "fa-chart-simple",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/stats-view.hbs",
+      sectionHeader: { title: "Details", icon: renderInterfaceIcon("fa-chart-simple") },
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      icon: "fa-bolt",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/actions-view.hbs",
+    },
+    {
+      key: "rolls",
+      label: "Rolls",
+      icon: "pp-die-d20",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/rolls-view.hbs",
+    },
+    {
+      key: "spells",
+      label: "Spells",
+      icon: "fa-wand-magic-sparkles",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/spells-view.hbs",
+    },
+    {
+      key: "inventory",
+      label: "Inventory",
+      icon: "fa-sack-xmark",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/item-view.hbs",
+    },
+    {
+      key: "map",
+      label: "Controls",
+      icon: "fa-gamepad",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/map-view.hbs",
+    },
+  ],
+  filterAvailableTabs(tabs, summary) { return tabs.filter(t => t.key !== "map" || (state.scene?.mapControlsEnabled ?? setting("mapControlsEnabled", true)) === true); },
 };
 
 export const CURRENCY_LABELS = [

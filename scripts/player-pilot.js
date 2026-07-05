@@ -1,4 +1,4 @@
-import { DND5E_ABILITIES, DND5E_ADAPTER, actorConcentrationEffects, applyPendingCastLevel, concentrationEffectLabel, dndSpellScalingIncrease, readExhaustionValue } from "./dnd5e.js";
+import { DND5E_ABILITIES, DND5E_ADAPTER, actorConcentrationEffects, applyPendingCastLevel, concentrationEffectLabel, dndSpellScalingIncrease } from "./dnd5e.js";
 import {
   CURRENCY_LABELS,
   GENERIC_ADAPTER,
@@ -32,6 +32,7 @@ import {
   pf2eTraits
 } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
+import { SWADE_ADAPTER, SWADE_QUICK_FILTERS } from "./swade.js";
 import {
   asArray,
   capitalizeWords,
@@ -121,8 +122,16 @@ export function renderDieGlyph(sides, extraClass = "") {
   return `<img class="${escapeHtml(classes)}" src="${escapeHtml(`${GAME_ICON_DICE_ROOT}/d${die}.svg`)}" alt="" aria-hidden="true">`;
 }
 
+export function renderImage(path, extraClass = "") {
+  return `<img class="${escapeHtml(extraClass)}" src="${path}">`;
+}
+
 export function renderInterfaceIcon(icon, extraClass = "") {
   if (icon === "pp-die-d20") return renderDieGlyph(20, extraClass);
+  if (/[\\/]/.test(icon) || /\.[a-z0-9]+$/i.test(icon)) {
+    //icon looks like a file path so assume this is an img
+    return renderImage(icon);
+  }
   const classes = ["fas", String(icon ?? ""), String(extraClass ?? "")].filter(Boolean).join(" ");
   return `<i class="${escapeHtml(classes)}" aria-hidden="true"></i>`;
 }
@@ -435,16 +444,6 @@ if (initialUser) {
   }
 }
 
-export const TABS = [
-  ["stats", "Details", "fa-chart-simple"],
-  ["actions", "Actions", "fa-bolt"],
-  ["rolls", "Rolls", "pp-die-d20"],
-  ["spells", "Spells", "fa-wand-magic-sparkles"],
-  ["features", "Features", "fa-star"],
-  ["inventory", "Inventory", "fa-sack-xmark"],
-  ["map", "Controls", "fa-gamepad"]
-];
-
 export const state = {
   shell: null,
   actorId: "",
@@ -551,7 +550,7 @@ function warnPaused() {
   addLog("Game paused");
 }
 
-function activeGmIds() {
+export function activeGmIds() {
   return asArray(game.users)
     .filter((user) => user.isGM && user.active)
     .map((user) => user.id);
@@ -591,7 +590,7 @@ function manualTargetIncluded(sceneId, tokenDoc) {
   return (!!tokenId && list.tokenIds.includes(tokenId)) || (!!actorId && list.actorIds.includes(actorId));
 }
 
-function sendSocket(type, payload = {}) {
+export function sendSocket(type, payload = {}) {
   if (!game.socket?.emit) return false;
   try {
     game.socket.emit(SOCKET, {
@@ -607,7 +606,7 @@ function sendSocket(type, payload = {}) {
   }
 }
 
-function addLog(text, details = {}) {
+export function addLog(text, details = {}) {
   state.log.unshift({
     text: String(text ?? ""),
     total: details.total ?? null,
@@ -766,10 +765,11 @@ function activeTokenForActor(actorId = state.actorId) {
   return actorToken;
 }
 
-function systemAdapter(actor) {
+export function systemAdapter() {
   const id = String(game.system?.id ?? "").toLowerCase();
   if (id === "dnd5e") return DND5E_ADAPTER;
   if (id === "pf2e") return PF2E_ADAPTER;
+  if (id === "swade") return SWADE_ADAPTER;
   return GENERIC_ADAPTER;
 }
 
@@ -913,7 +913,9 @@ function actorModelSignature(actor) {
   const itemStamps = asArray(actor?.items)
     .map((item) => `${item.id}:${item?._stats?.modifiedTime ?? item?._source?._stats?.modifiedTime ?? item?._source?._stats?.lastModifiedTime ?? ""}`)
     .join("|");
-  return `${actor?.id ?? ""}:${actorStamp}:${itemStamps}`;
+
+  const effectFingerprint = actor?.statuses ? `${Array.from(actor.statuses).join(",")}:${(actor.effects).map((e) => `${e.id ?? ""}:${e.img ?? ""}`)}` : "";
+  return `${actor?.id ?? ""}:${actorStamp}:${itemStamps}:${effectFingerprint}`;
 }
 
 export function cachedModel(actor) {
@@ -926,7 +928,7 @@ export function cachedModel(actor) {
   return model;
 }
 
-function invalidateModelCache() {
+export function invalidateModelCache() {
   state.modelCache = null;
 }
 
@@ -1123,27 +1125,52 @@ function registerSettings() {
 }
 
 async function loadTemplates() {
-  await foundry.applications.handlebars.loadTemplates([
+  const templates = [
+    "modules/player-pilot/templates/player-pilot-shell/partials/benny-controls.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/stats-view.hbs",
     "modules/player-pilot/templates/player-pilot-shell/views/actions-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/rolls-view.hbs",
-    "modules/player-pilot/templates/player-pilot-shell/views/spells-view.hbs",
     "modules/player-pilot/templates/player-pilot-shell/views/features-view.hbs",
     "modules/player-pilot/templates/player-pilot-shell/views/item-view.hbs",
     "modules/player-pilot/templates/player-pilot-shell/views/map-view.hbs",
-  ]);
+    "modules/player-pilot/templates/player-pilot-shell/views/no-player-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/rolls-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/spells-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/stats-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/dnd5e/stats-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/pf2e/stats-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/swade/powers-view.hbs",
+    "modules/player-pilot/templates/player-pilot-shell/views/swade/stats-view.hbs",
+  ];
+
+  await foundry.applications.handlebars.loadTemplates(templates);
 }
 
 async function registerHandlebarsHelpers() {
-  Handlebars.registerHelper(`renderInterfaceIcon`, renderInterfaceIcon);
-  Handlebars.registerHelper(`renderActionsView`, renderActionsView);
-  Handlebars.registerHelper(`renderRollsView`, renderRollsView);
-  Handlebars.registerHelper(`renderSpellsView`, renderSpellsView);
-  Handlebars.registerHelper(`renderFeaturesView`, renderFeaturesView);
-  Handlebars.registerHelper(`renderItemView`, renderItemView);
-  Handlebars.registerHelper(`renderMapView`, renderMapView);
+  Handlebars.registerHelper({
+    renderDieGlyph,
+    renderInterfaceIcon,
+    renderActionsView,
+    renderRollsView,
+    renderSpellsView,
+    renderFeaturesView,
+    renderItemView,
+    renderMapView,
+    renderSmartBadge,
+    renderBadge,
+    filterItemsForView,
+  });
+
+  Handlebars.registerHelper("renderItemCard", function (item, options) {
+    return renderItemCard(item, options.hash);
+  });
+
+  Handlebars.registerHelper("isQuickFilterActive", function (filter, options) {
+    return (filter === "all" && !options.data.root.selectedFilters.size) ||
+      options.data.root.activeFilter === filter ||
+      options.data.root.selectedFilters.find(f => f.key === filter);
+  });
 }
 
 function notifyPilotsToRefresh() {
@@ -1459,7 +1486,7 @@ function unmountPilotShell() {
   invalidateModelCache();
 }
 
-function queueRender() {
+export function queueRender() {
   if (!state.shell || state.renderQueued) return;
   state.renderQueued = true;
   window.requestAnimationFrame(() => {
@@ -1468,94 +1495,8 @@ function queueRender() {
   });
 }
 
-function captureRenderState(shell) {
-  const body = shell.querySelector(".pp-body");
-  const active = document.activeElement;
-  const search = active instanceof HTMLInputElement && active.classList.contains("pp-search") ? active : null;
-  return {
-    scrollTop: body?.scrollTop ?? 0,
-    searchFocused: !!search,
-    searchValue: state.search,
-    selectionStart: search?.selectionStart ?? null,
-    selectionEnd: search?.selectionEnd ?? null
-  };
-}
-
-function restoreRenderState(snapshot) {
-  if (!state.shell || !snapshot) return;
-  const body = state.shell.element.querySelector(".pp-body");
-  if (body) {
-    body.scrollTop = state.scrollBodyToTop ? 0 : snapshot.scrollTop;
-    state.scrollBodyToTop = false;
-  }
-  if (snapshot.searchFocused) {
-    const search = state.shell.element.querySelector(".pp-search");
-    if (search instanceof HTMLInputElement) {
-      search.value = snapshot.searchValue;
-      search.focus({ preventScroll: true });
-      if (snapshot.selectionStart !== null && snapshot.selectionEnd !== null) {
-        search.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
-      }
-      applySearchFilter();
-    }
-  }
-}
-
 async function renderShell() {
   await state.shell.render(true);
-  const style = window.getComputedStyle?.(state.shell.element);
-  return;
-  //const shell = state.shell;
-  if (!shell) return;
-  const snapshot = captureRenderState(shell);
-  const actor = currentActor();
-  if (!actor) {
-    shell.innerHTML = renderNoActor();
-    restoreRenderState(snapshot);
-    return;
-  }
-  const model = cachedModel(actor);
-  shell.classList.toggle("pp-paused", !!game.paused);
-  shell.innerHTML = `
-    ${await renderHeader(actor, model)}
-    <div class="pp-banner">Game paused</div>
-    ${renderTabs()}
-    <main class="pp-body">
-      ${renderActiveView(actor, model)}
-      ${renderSupportFooter()}
-    </main>
-    <button class="pp-scroll-top" type="button" data-action="scroll-top" aria-label="Scroll back to top" title="Back to top">
-      <i class="fas fa-arrow-up"></i>
-    </button>
-  `;
-  restoreRenderState(snapshot);
-  applySearchFilter();
-  updateScrollTopButton();
-}
-
-function renderNoActor() {
-  return `
-    <header class="pp-topbar">
-      <div class="pp-portrait"></div>
-      <div class="pp-title">
-        <h1>Player Pilot</h1>
-        <small>No owned actor found for this user.</small>
-      </div>
-      <div class="pp-top-actions"></div>
-    </header>
-    <main class="pp-body">
-      <div class="pp-empty">Ask the GM to give your Foundry user owner permission on your character.</div>
-      ${renderSupportFooter()}
-    </main>
-  `;
-}
-
-function renderSupportFooter() {
-  return `
-    <footer class="pp-support-footer">
-      <a href="${escapeHtml(SUPPORT_URL)}" target="_blank" rel="noopener">Support Player Pilot</a>
-    </footer>
-  `;
 }
 
 function renderStatCard(key, icon, label, value, controls = "") {
@@ -1609,143 +1550,12 @@ function renderAbilityScores(summary = {}) {
   `;
 }
 
-async function renderHeader(actor, model) {
-  const actors = getOwnedActors();
-  const summary = model.summary;
-  const data = {
-    showActorSelect: actors.length > 1,
-    ownedActors: actors,
-    currentActor: actor,
-    summary,
-    model
-  };
-  const content = await foundry.applications.handlebars.renderTemplate("modules/player-pilot/templates/player-pilot-shell/body.hbs", data);
-  return content;
-}
-
-function renderTabs() {
-  const availableTabs = TABS.filter(([key]) => key !== "map" || (state.scene?.mapControlsEnabled ?? setting("mapControlsEnabled", true)) === true);
-  if (!availableTabs.some(([key]) => key === state.activeTab)) state.activeTab = "actions";
-  return `
-    <nav class="pp-tabs ${state.navOpen ? "open" : ""}" aria-label="Player Pilot tabs">
-      ${availableTabs.map(([key, label, icon]) => `
-        <button class="pp-tab" type="button" data-action="tab" data-tab="${key}" aria-selected="${state.activeTab === key ? "true" : "false"}">
-          ${renderInterfaceIcon(icon)}
-          <span>${escapeHtml(label)}</span>
-        </button>
-      `).join("")}
-    </nav>
-  `;
-}
-
 function renderSearchInput(placeholder) {
   return `
     <div class="pp-search-wrap">
       <input class="pp-search" type="text" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(state.search)}" data-action="search">
       <button class="pp-search-clear ${state.search ? "" : "hidden"}" type="button" data-action="search-clear" aria-label="Clear search"><i class="fas fa-xmark"></i></button>
     </div>
-  `;
-}
-
-function renderActiveView(actor, model) {
-  if (state.activeTab === "stats") return renderStatsView(model);
-  if (state.activeTab === "actions") return renderActionsView(model);
-  if (state.activeTab === "rolls") return renderRollsView(model);
-  if (state.activeTab === "spells") return renderSpellsView(model);
-  if (state.activeTab === "features") return renderFeaturesView(model);
-  if (state.activeTab === "inventory") return renderItemView("inventory", model.groups.inventory, "No inventory items found.");
-  if (state.activeTab === "map") return renderMapView(actor);
-  return "";
-}
-
-function renderStatsView(model) {
-  const summary = model.summary;
-  const exhaustionControls = model.adapter.id === "dnd5e" ? `
-    <div class="pp-detail-strip pp-exhaustion-strip">
-      <i class="fas fa-triangle-exclamation"></i>
-      <span>Exhaustion</span>
-      <button type="button" data-action="exhaustion" data-delta="-1" title="Lower exhaustion"><i class="fas fa-minus"></i></button>
-      <strong>${escapeHtml(summary.exhaustionValue ?? 0)}</strong>
-      <button type="button" data-action="exhaustion" data-delta="1" title="Raise exhaustion"><i class="fas fa-plus"></i></button>
-    </div>
-  ` : "";
-  const deathControls = model.adapter.id === "dnd5e" ? `
-    <div class="pp-detail-strip pp-death-strip">
-      <div class="pp-death-title"><i class="fas fa-skull-crossbones"></i><span>Death Saves</span></div>
-      <div class="pp-death-save-actions">
-        <button class="pp-death-result success" type="button" data-action="death-save" data-kind="success" title="Add a death save success">
-          <i class="fas fa-thumbs-up"></i><span>Successes</span><strong>${escapeHtml(summary.deathSuccess ?? 0)} / 3</strong>
-        </button>
-        <button class="pp-death-result failure" type="button" data-action="death-save" data-kind="failure" title="Add a death save failure">
-          <i class="fas fa-thumbs-down"></i><span>Failures</span><strong>${escapeHtml(summary.deathFailure ?? 0)} / 3</strong>
-        </button>
-        <button class="pp-death-reset" type="button" data-action="death-save" data-kind="reset" title="Reset death saves" aria-label="Reset death saves"><i class="fas fa-rotate-left"></i></button>
-      </div>
-    </div>
-  ` : "";
-  const pf2eControls = model.adapter.id === "pf2e" ? `
-    <div class="pp-detail-strip pp-pf2e-resource-strip">
-      <i class="fas fa-star"></i>
-      <span>Hero Points</span>
-      <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="-1" title="Spend a Hero Point"><i class="fas fa-minus"></i></button>
-      <strong>${escapeHtml(summary.heroPointsValue ?? 0)} / ${escapeHtml(summary.heroPointsMax ?? 3)}</strong>
-      <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="1" title="Gain a Hero Point"><i class="fas fa-plus"></i></button>
-    </div>
-    ${Number(summary.focusMax ?? 0) > 0 ? `
-      <div class="pp-detail-strip pp-pf2e-resource-strip">
-        <i class="fas fa-bullseye"></i>
-        <span>Focus Points</span>
-        <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="-1" title="Spend a Focus Point"><i class="fas fa-minus"></i></button>
-        <strong>${escapeHtml(summary.focusValue ?? 0)} / ${escapeHtml(summary.focusMax ?? 0)}</strong>
-        <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="1" title="Recover a Focus Point"><i class="fas fa-plus"></i></button>
-      </div>
-    ` : ""}
-    <div class="pp-pf2e-condition-panel">
-      <div class="pp-pf2e-condition-values">
-        <span title="At your maximum Dying value, your character dies."><i class="fas fa-heart-crack"></i><b>Dying</b><strong>${escapeHtml(summary.dyingValue ?? 0)} / ${escapeHtml(summary.dyingMax ?? 4)}</strong></span>
-        <span title="When you recover from Dying, Wounded increases and affects the next time you gain Dying."><i class="fas fa-bandage"></i><b>Wounded</b><strong>${escapeHtml(summary.woundedValue ?? 0)} / ${escapeHtml(summary.woundedMax ?? 3)}</strong></span>
-        <span title="Doomed lowers your maximum Dying value."><i class="fas fa-skull"></i><b>Doomed</b><strong>${escapeHtml(summary.doomedValue ?? 0)} / ${escapeHtml(summary.doomedMax ?? 4)}</strong></span>
-      </div>
-      <button class="pp-action-btn" type="button" data-action="roll-check" data-kind="recovery" data-key="recovery" title="${Number(summary.dyingValue ?? 0) > 0 ? `Roll a DC ${escapeHtml(summary.recoveryDc ?? 10)} recovery check` : "Recovery checks are only rolled while Dying"}" ${Number(summary.dyingValue ?? 0) > 0 ? "" : "disabled"}>
-        Recovery Check${Number(summary.dyingValue ?? 0) > 0 ? ` (DC ${escapeHtml(summary.recoveryDc ?? 10)})` : ""}
-      </button>
-      <small>These values mirror PF2e conditions. Recovery checks are available only while Dying.</small>
-    </div>
-  ` : "";
-  const restBlock = model.adapter.id === "pf2e" ? `
-        <div class="pp-rest-row">
-          <button class="pp-button" type="button" data-action="rest" data-rest="night">Rest for the Night</button>
-        </div>
-  ` : (model.adapter.id === "dnd5e" ? `
-        <div class="pp-rest-row">
-          <button class="pp-button" type="button" data-action="rest" data-rest="short">Short Rest</button>
-          <button class="pp-button" type="button" data-action="rest" data-rest="long">Long Rest</button>
-        </div>
-  ` : "");
-  return `
-    <section class="pp-view pp-stats-page pp-system-${escapeHtml(model.adapter.id)} active">
-      <div class="pp-section">
-        ${renderSectionHeader("Details", "fa-chart-simple", model.adapter.label)}
-        ${renderHpBar(summary)}
-        <div class="pp-initiative-strip">
-          <i class="fas fa-flag-checkered"></i>
-          <span>Initiative Modifier</span>
-          <strong>${escapeHtml(summary.initiative ?? "+0")}</strong>
-          <button class="pp-initiative-roll" type="button" data-action="${model.adapter.id === "pf2e" ? "pf2e-initiative" : "roll-check"}" data-kind="initiative" data-key="initiative" title="${model.adapter.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative"}">
-            ${renderDieGlyph(20)}
-          </button>
-        </div>
-        <div class="pp-status-grid">
-          ${renderStatCard("ac", "fa-shield-halved", "Armor Class", summary.ac)}
-          ${renderStatCard("speed", "fa-person-running", "Speed", summary.speed)}
-          ${renderStatCard("level", "fa-star", "Level", summary.level ?? summary.resource ?? "-")}
-          ${renderStatCard("prof", "pp-die-d20", model.adapter.id === "pf2e" ? "Modifiers" : (model.adapter.id === "dnd5e" ? "Proficiency" : "System"), summary.prof ?? summary.resource ?? "-")}
-        </div>
-        <div class="pp-detail-strips">${exhaustionControls}${deathControls}${pf2eControls}</div>
-        ${renderAbilityScores(summary)}
-        ${restBlock}
-      </div>
-    </section>
   `;
 }
 
@@ -1848,22 +1658,23 @@ const GENERIC_QUICK_FILTERS = {
 function quickFilterOptions(key) {
   const systemId = currentSystemId();
   if (systemId === "pf2e" && PF2E_QUICK_FILTERS[key]) return PF2E_QUICK_FILTERS[key];
+  if (systemId === "swade" && SWADE_QUICK_FILTERS[key]) return SWADE_QUICK_FILTERS[key];
   if (systemId !== "dnd5e" && GENERIC_QUICK_FILTERS[key]) return GENERIC_QUICK_FILTERS[key];
   return QUICK_FILTERS[key] ?? [];
 }
 
-function quickFilterFor(key) {
+export function quickFilterFor(key) {
   const value = state.quickFilters?.[key];
   return Array.isArray(value) ? (value[0] ?? "all") : (value ?? "all");
 }
 
-function selectedQuickFilters(key) {
+export function selectedQuickFilters(key) {
   const value = state.quickFilters?.[key];
   if (Array.isArray(value)) return value.filter((entry) => entry && entry !== "all");
   return value && value !== "all" ? [value] : [];
 }
 
-function isMultiFilterKey(key) {
+export function isMultiFilterKey(key) {
   return ["actionTiming", "actionSpellTraits", "inventory", "features"].includes(key);
 }
 
@@ -1876,7 +1687,7 @@ function renderQuickFilters(key) {
   return `
     <div class="pp-filter-row" aria-label="Quick filters">
       ${filters.map(([value, label, icon]) => `
-        <button class="pp-chip ${(multi ? (value === "all" ? !selected.size : selected.has(value)) : active === value) ? "active" : ""}" type="button" data-action="quick-filter" data-filter-key="${escapeHtml(key)}" data-filter="${escapeHtml(value)}" data-multi="${multi ? "true" : "false"}" aria-pressed="${(multi ? selected.has(value) : active === value) ? "true" : "false"}">${icon ? `<i class="fas ${escapeHtml(icon)}"></i>` : ""}${escapeHtml(label)}</button>
+        <button class="pp-chip ${(multi ? (value === "all" ? !selected.size : selected.has(value)) : active === value) ? "active" : ""}" type="button" data-action="quickFilter" data-filter-key="${escapeHtml(key)}" data-filter="${escapeHtml(value)}" data-multi="${multi ? "true" : "false"}" aria-pressed="${(multi ? selected.has(value) : active === value) ? "true" : "false"}">${icon ? `<i class="fas ${escapeHtml(icon)}"></i>` : ""}${escapeHtml(label)}</button>
       `).join("")}
     </div>
   `;
@@ -1928,10 +1739,16 @@ function matchesOneQuickFilter(key, filter, item) {
   }
   if (key === "actions" && filter === "item") return ["consumable", "tool", "equipment", "loot"].includes(item.type);
   if (key === "actions" && filter === "feature") return ["feat", "class", "subclass", "classfeature", "action", "race", "background"].includes(item.type);
+  if (item.arcane !== undefined) {
+    if (item.arcane.toLowerCase() === filter ||
+      (!item.arcane && filter === "general")) {
+      return true;
+    }
+  }
   return item.type === filter || item.activation === filter || item.group === filter;
 }
 
-function filterItemsForView(key, items = []) {
+export function filterItemsForView(key, items = []) {
   return items.filter((item) => {
     if (!matchesSearch(item) || !matchesQuickFilter(key, item)) return false;
     if (key !== "actions") return true;
@@ -2101,6 +1918,7 @@ function renderActionGroup(title, items = [], adapterId = "") {
   const categories = [
     ["weapon", "Weapons", "sword.svg"],
     ["spell", "Spells", "book.svg"],
+    ["power", "Powers", "book.svg"],
     ["item", "Items", "item-bag.svg"],
     ["feature", "Class Features", "upgrade.svg"]
   ];
@@ -2132,7 +1950,8 @@ function renderActionGroup(title, items = [], adapterId = "") {
 function actionItemCategory(item) {
   if (item?.type === "weapon") return "weapon";
   if (item?.type === "spell") return "spell";
-  if (["consumable", "tool", "equipment", "loot"].includes(item?.type)) return "item";
+  if (item?.type === "power") return "power";
+  if (["consumable", "tool", "gear", "equipment", "loot"].includes(item?.type)) return "item";
   return "feature";
 }
 
@@ -2912,7 +2731,7 @@ function shouldDelaySceneRender() {
   return isInShell(document.activeElement) && document.activeElement?.classList?.contains?.("pp-search");
 }
 
-function applySearchFilter() {
+export function applySearchFilter() {
   const q = state.search.trim().toLowerCase();
   const shell = state.shell.element;
   if (!shell) return;
@@ -2975,7 +2794,7 @@ async function handleDocumentClick(event) {
     queueRender();
     return;
   }
-  if (action === "quick-filter") {
+  if (action === "quickFilter") {
     const key = actionEl.dataset.filterKey ?? state.activeTab;
     const value = actionEl.dataset.filter ?? "all";
     if (actionEl.dataset.multi === "true" || isMultiFilterKey(key)) {
@@ -3023,10 +2842,6 @@ async function handleDocumentClick(event) {
     state.suppressSceneRenderUntil = 0;
     requestSceneState(true);
     queueRender();
-    return;
-  }
-  if (action === "exhaustion") {
-    await updateExhaustion(Number(actionEl.dataset.delta ?? 0));
     return;
   }
   if (action === "death-save") {
@@ -3144,7 +2959,7 @@ function findItem(itemId) {
   return actor?.items?.get?.(itemId) ?? null;
 }
 
-function openModal(content, handlers = {}) {
+export function openModal(content, handlers = {}) {
   closeModal();
   document.querySelector(".pp-result-toast")?.remove();
   const modal = document.createElement("section");
@@ -3178,7 +2993,7 @@ function openModal(content, handlers = {}) {
   });
 }
 
-function closeModal() {
+export function closeModal() {
   state.modal?.remove();
   state.modal = null;
   document.body.classList.remove("player-pilot-modal-open");
@@ -4388,7 +4203,7 @@ function openRollChoiceDialog(data = {}) {
   });
 }
 
-function openPf2eInitiativeDialog() {
+export function openPf2eInitiativeDialog() {
   const actor = currentActor();
   if (!actor || systemAdapter(actor).id !== "pf2e") return;
   const selected = String(actor.system?.initiative?.statistic ?? "perception");
@@ -4566,7 +4381,7 @@ function openRollReminderDialog(item, actor, options = {}) {
   });
 }
 
-async function executePlayerFirst(actionLabel, localFn, socketType, payload) {
+export async function executePlayerFirst(actionLabel, localFn, socketType, payload) {
   if (pilotPaused()) {
     warnPaused();
     return false;
@@ -4598,7 +4413,7 @@ async function executePlayerFirst(actionLabel, localFn, socketType, payload) {
   return false;
 }
 
-function actorHasActiveTurn(actor) {
+export function actorHasActiveTurn(actor) {
   const combatant = game.combat?.combatant;
   if (!combatant) return true;
   const combatActorId = String(combatant.actor?.id ?? combatant.actorId ?? "");
@@ -5012,7 +4827,7 @@ function openManualRollDialog(data = {}) {
   window.setTimeout(() => state.modal?.querySelector("[name='manualD20']")?.focus?.(), 20);
 }
 
-function showResultToast(title, detail = "") {
+export function showResultToast(title, detail = "") {
   if (state.modal) return;
   const existing = document.querySelector(".pp-result-toast");
   existing?.remove();
@@ -5221,27 +5036,6 @@ async function togglePrepared(itemId) {
   queueRender();
 }
 
-export async function updateExhaustion(delta) {
-  const actor = currentActor();
-  if (!actor || !Number.isFinite(delta) || delta === 0) return;
-  const current = readExhaustionValue(actor);
-  const next = clamp(current + delta, 0, 6);
-  const updated = await executePlayerFirst(
-    `Exhaustion ${next}`,
-    async () => actor.update(exhaustionUpdateData(actor, next)),
-    "updateActorData",
-    { actorId: actor.id, updates: exhaustionUpdateData(actor, next), label: `Exhaustion ${next}` }
-  );
-  if (updated) {
-    invalidateModelCache();
-    queueRender();
-    window.setTimeout(() => {
-      invalidateModelCache();
-      queueRender();
-    }, 250);
-  }
-}
-
 async function updatePf2eResource(resource, delta) {
   const actor = currentActor();
   if (!actor || systemAdapter(actor).id !== "pf2e" || !Number.isFinite(delta) || delta === 0) return;
@@ -5259,15 +5053,6 @@ async function updatePf2eResource(resource, delta) {
     { actorId: actor.id, updates, label: `${label} ${next}` }
   );
   window.setTimeout(queueRender, 50);
-}
-
-
-function exhaustionUpdateData(actor, value) {
-  const raw = actor?.system?.attributes?.exhaustion;
-  if (typeof raw === "object" && raw !== null && Object.prototype.hasOwnProperty.call(raw, "value")) {
-    return { "system.attributes.exhaustion.value": value };
-  }
-  return { "system.attributes.exhaustion": value };
 }
 
 async function updateDeathSaves(kind) {
@@ -7141,6 +6926,7 @@ function registerHooks() {
   Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.once("init", async () => {
     await loadTemplates();
+    registerHandlebarsHelpers();
     registerSettings();
     const activePilot = earlyUserIsPilot();
     syncManagedNoCanvas(activePilot && setting('useNoCanvas', true) === true);
@@ -7166,7 +6952,6 @@ function registerHooks() {
     mountPilotShell();
   });
   Hooks.once("ready", async () => {
-    registerHandlebarsHelpers();
     updateBootBranding();
     if (userIsPilot()) setBootStage(90, "Finishing character data...", 95);
     game.socket?.on?.(SOCKET, handleSocket);

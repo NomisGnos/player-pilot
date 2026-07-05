@@ -7,6 +7,7 @@ import {
   itemUsesText,
   normalizeItem,
 } from "./generic.js";
+import { activeGmIds, actorHasActiveTurn, addLog, closeModal, executePlayerFirst, openModal, renderInterfaceIcon, sendSocket, setting, showResultToast } from "./player-pilot.js";
 import {
   asArray,
   capitalizeWords,
@@ -17,6 +18,7 @@ import {
   htmlToPlain,
   localize,
   localizedFieldLabel,
+  mergeTabs,
   numberText,
   signedMod
 } from "./utils.js";
@@ -32,10 +34,13 @@ export const PF2E_ADAPTER = {
       name: actor?.name ?? "Actor",
       type: actor?.type ?? "",
       img: actor?.img ?? "icons/svg/mystery-man.svg",
-      hp: `${numberText(hp.value)} / ${numberText(hp.max)}`,
-      hpValue: Number(hp.value ?? 0),
-      hpMax: Number(hp.max ?? 0),
-      hpTemp: Number(hp.temp ?? hp.temporary ?? 0),
+      hp: {
+        display: `${numberText(hp.value)} / ${numberText(hp.max)}`,
+        value: hp.value,
+        max: hp.max,
+        temp: hp.temp,
+        pct: hp.max > 0 ? (hp.value / hp.max) * 100 : 0,
+      },
       ac: numberText(actor?.attributes?.ac?.value ?? system.attributes?.ac?.value),
       speed: pf2eSpeedSummary(actor),
       initiative: signedMod(actor?.initiative?.statistic?.mod ?? actor?.initiative?.mod ?? system.attributes?.initiative?.totalModifier ?? actor?.perception?.mod ?? system.attributes?.perception?.mod ?? 0),
@@ -216,9 +221,23 @@ export const PF2E_ADAPTER = {
     if (action === "spellAttack" && typeof variant?.rollAttack === "function") return variant.rollAttack(event, Number(options.attackNumber ?? 1) || 1);
     if (action === "spellDamage" && typeof variant?.rollDamage === "function") return variant.rollDamage(event);
     throw new Error("PF2e item roll is unavailable.");
-  }
+  },
+  TABS: mergeTabs(GENERIC_ADAPTER.TABS, [
+    {
+      key: "stats",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/pf2e/stats-view.hbs",
+    },
+    { key: "actions" },
+    { key: "rolls" },
+    { key: "spells" },
+    { key: "inventory" },
+    { key: "map" },
+  ]),
 };
 
+export const PF2E_ACTIONS = {
+  pf2eRest: requestRest,
+};
 
 export function pf2eAbilityScores(actor) {
   const source = actor?.system?.abilities ?? actor?.abilities ?? {};
@@ -721,4 +740,44 @@ export function pf2eSyntheticRollEvent(dataset = {}) {
     preventDefault() { },
     stopPropagation() { }
   };
+}
+
+async function requestRest() {
+  const actor = this.currentActor;
+  if (!actor) return;
+  if (setting("combatTurnLock", false) === true && !actorHasActiveTurn(actor)) {
+    ui.notifications?.warn?.("It is not this actor's turn.");
+    addLog("Turn locked");
+    return;
+  }
+
+  if (game.users.activeGM) {
+    sendSocket("rest", {
+      targetUserIds: [game.users.activeGM.id],
+      actorId: actor.id,
+      restType: "night"
+    });
+    addLog("Rest for the Night sent to GM");
+    showResultToast("Rest request sent", "The GM has the PF2e confirmation.");
+    return;
+  }
+
+  openModal(`
+    <h2>Rest for the Night?</h2>
+    <p>PF2e will recover the character according to its Rest for the Night rules.</p>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+      <button class="pp-button primary" type="button" data-modal-action="confirmRest">Rest</button>
+    </div>
+  `, {
+    confirmRest: async () => {
+      closeModal();
+      await executePlayerFirst(
+        "Rest for the Night",
+        async () => PF2E_ADAPTER.rest(actor, { skipDialog: true }),
+        "rest",
+        { actorId: actor.id, restType: "night" }
+      );
+    }
+  });
 }

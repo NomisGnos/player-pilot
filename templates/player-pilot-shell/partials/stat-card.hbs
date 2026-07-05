@@ -4,5 +4,7 @@
     <span>{{label}}</span>
     <strong>{{value}}</strong>
   </div>
-  {{controls}}
+  {{#if controls}}
+    {{> (lookup . "controls")}}
+  {{/if}}
 </div>

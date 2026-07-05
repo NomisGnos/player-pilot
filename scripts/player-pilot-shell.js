@@ -1,5 +1,22 @@
-import { SUPPORT_URL, TABS, cachedModel, renderDieGlyph, renderInterfaceIcon, requestRest, rollCheck, setting, state, updateExhaustion } from "./player-pilot.js";
-import { clamp } from "./utils.js";
+import { DND5E_ACTIONS } from "./dnd5e.js";
+import { PF2E_ACTIONS } from "./pf2e.js";
+import {
+  SUPPORT_URL,
+  applySearchFilter,
+  cachedModel,
+  isMultiFilterKey,
+  openPf2eInitiativeDialog,
+  queueRender,
+  quickFilterFor,
+  renderDieGlyph,
+  renderInterfaceIcon,
+  rollCheck,
+  selectedQuickFilters,
+  setting,
+  state,
+  systemAdapter,
+} from "./player-pilot.js";
+import { SWADE_ACTIONS } from "./swade.js";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) {
@@ -29,6 +46,20 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
         this.render(true);
       },
+      quickFilter: function (event, button) {
+        const key = button.dataset.filterKey ?? state.activeTab;
+        const value = button.dataset.filter ?? "all";
+        if (button.dataset.multi === "true" || isMultiFilterKey(key)) {
+          const selected = new Set(selectedQuickFilters(key));
+          if (value === "all") selected.clear();
+          else if (selected.has(value)) selected.delete(value);
+          else selected.add(value);
+          state.quickFilters[key] = Array.from(selected);
+        } else {
+          state.quickFilters[key] = value;
+        }
+        queueRender();
+      },
       rollInitiative: async function (event, button) {
         const model = cachedModel(this.currentActor);
         if (model.adapter.id === "pf2e") {
@@ -37,19 +68,16 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
           await rollCheck("initiative", "initiative");
         }
       },
-      exhaustion: async function (event, button) {
-        await updateExhaustion(Number(button.dataset.delta ?? 0));
-      },
-      rest: async function (event, button) {
-        await requestRest(button.dataset.rest ?? "short");
-      },
+      ...DND5E_ACTIONS,
+      ...PF2E_ACTIONS,
+      ...SWADE_ACTIONS,
     },
   };
 
   static PARTS = {
     header: { template: "modules/player-pilot/templates/player-pilot-shell/header.hbs" },
     tabs: { template: 'modules/player-pilot/templates/player-pilot-shell/tab-navigation.hbs' },
-    body: { template: "modules/player-pilot/templates/player-pilot-shell/body.hbs" },
+    body: { scrollable: [""] },
     footer: { template: "modules/player-pilot/templates/player-pilot-shell/footer.hbs" },
   };
 
@@ -57,14 +85,29 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     super(options);
   }
 
+  _configureRenderParts(options) {
+    const parts = super._configureRenderParts(options);
+
+    const ownedActors = game.actors.filter(a => a.isOwner);
+    this.currentActor = this.getCurrentActor(ownedActors);
+
+    if (this.currentActor) {
+      const sysAdapter = systemAdapter();
+      const activeTab = sysAdapter.TABS.find(t => t.key === state.activeTab);
+      parts.body.template = activeTab.viewTemplate;
+    } else {
+      parts.body.template = "modules/player-pilot/templates/player-pilot-shell/views/no-player-view.hbs";
+    }
+    return parts;
+  }
 
   prepareTabs(availableTabs) {
-    return availableTabs.reduce((tabs, [key, label, icon]) => {
-      const isActive = state.activeTab === key;
-      tabs[key] = {
-        id: key,
-        label: label,
-        icon: renderInterfaceIcon(icon),
+    return availableTabs.reduce((tabs, tab) => {
+      const isActive = state.activeTab === tab.key;
+      tabs[tab.key] = {
+        id: tab.key,
+        label: tab.label,
+        icon: renderInterfaceIcon(tab.icon),
         active: isActive,
       };
       return tabs;
@@ -74,52 +117,28 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
   async _prepareContext(options) {
     await super._prepareContext(options);
 
-    const availableTabs = TABS.filter(([key]) => key !== "map" || (state.scene?.mapControlsEnabled ?? setting("mapControlsEnabled", true)) === true);
-    if (!availableTabs.some(([key]) => key === state.activeTab)) state.activeTab = "actions";
-
     const ownedActors = game.actors.filter(a => a.isOwner);
-    this.currentActor = this.getCurrentActor(ownedActors);
 
+    const sysAdapter = systemAdapter();
     const model = cachedModel(this.currentActor);
     const summary = model.summary;
 
+    const availableTabs = sysAdapter.filterAvailableTabs(sysAdapter.TABS, summary);
+    if (!availableTabs.some(t => t.key === state.activeTab)) state.activeTab = "actions";
+    const activeTab = availableTabs.find(t => t.key === state.activeTab);
+
     const initiativeRollText = model.adapter.id === " pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
 
-    const sectionData = {
-      stats: {
-        title: "Details",
-        icon: renderInterfaceIcon("fa-chart-simple"),
-        count: model.adapter.label
-      }
-    };
+    const statCards = sysAdapter.statCards(model);
+    const inventoryGroups = sysAdapter.inventoryGroups(model);
 
-    const statCards = [
-      { key: "ac", icon: "fa-shield-halved", label: "Armor Class", value: summary.ac },
-      { key: "speed", icon: "fa-person-running", label: "Speed", value: summary.speed },
-      { key: "level", icon: "fa-star", label: "Level", value: summary.level ?? summary.resource ?? "-" },
-      {
-        key: "prof",
-        icon: "pp-die-d20",
-        label: model.adapter.id === "pf2e" ? "Modifiers" : (model.adapter.id === "dnd5e" ? "Proficiency" : "System"),
-        value: summary.prof ?? summary.resource ?? "-"
-      },
-    ];
-
-    const hpCurrent = Number(summary.hpValue ?? NaN);
-    const hpMax = Number(summary.hpMax ?? NaN);
-    const hpTemp = Math.max(0, Number(summary.hpTemp ?? 0) || 0);
-    const hpData = {
-      current: hpCurrent,
-      max: hpMax,
-      temp: hpTemp,
-      tempWidth: clamp((hpTemp / Math.max(hpMax || hpTemp, 1)) * 100, 5, 100),
-      pct: Number.isFinite(hpCurrent) && Number.isFinite(hpMax) && hpMax > 0 ? clamp((hpCurrent / hpMax) * 100, 0, 100) : 0,
-      label: Number.isFinite(hpCurrent) && Number.isFinite(hpMax) ? `${hpCurrent} / ${hpMax}` : (summary.hp ?? "-"),
-    };
+    const activeFilter = quickFilterFor(state.activeTab);
+    const selectedFilters = new Set(selectedQuickFilters(state.activeTab));
 
     return {
       availableTabs,
       tabs: this.prepareTabs(availableTabs),
+      activeTab,
       showActorSelect: ownedActors.length > 1,
       ownedActors,
       currentActor: this.currentActor,
@@ -127,13 +146,24 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       model,
       summary,
       supportUrl: SUPPORT_URL,
+      activeFilter,
+      selectedFilters,
       initiativeRollText,
       d20Icon: renderDieGlyph(20),
       statCards,
-      activeTab: state.activeTab,
-      sectionData,
-      hpData,
+      inventoryGroups,
     };
+  }
+
+  _onRender(context, options) {
+    super._onRender(context, options);
+
+    this.element.classList.toggle("pp-paused", !!game.paused);
+
+    this.element.addEventListener("scroll", e => this.updateScrollTopButton(), true);
+
+    this.updateScrollTopButton();
+    applySearchFilter();
   }
 
   getCurrentActor(ownedActors) {
@@ -146,5 +176,12 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const representative = ownedActors.find((actor) => actor.id === game.user.character?.id);
     state.actorId = representative?.id ?? ownedActors[0].id;
     return representative ?? ownedActors[0];
+  }
+
+  updateScrollTopButton(event) {
+    //TODO: Add scroll to top button
+    const body = this.element.querySelector(".pp-body");
+    const button = this.element.querySelector(".pp-scroll-top");
+    button?.classList.toggle("visible", body.scrollTop > 280);
   }
 }
