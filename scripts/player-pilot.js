@@ -5684,6 +5684,16 @@ function registerChatCapture() {
     const content = htmlToPlain(message.content ?? "");
     if (content) addLog(content.slice(0, 60));
   });
+
+  Hooks.on("renderChatMessageHTML", (message, html, options) => {
+    if (!userIsPilot()) return;
+    // Close any popped out chat messages
+    for (const app of Object.values(message.apps)) {
+      if (app instanceof CONFIG.ChatMessage.popoutClass) {
+        app.close();
+      }
+    }
+  });
 }
 
 async function handleSocket(data) {
@@ -5695,6 +5705,7 @@ async function handleSocket(data) {
     applySharedDocumentPopupMode();
     if (userIsPilot()) mountPilotShell();
     else unmountPilotShell();
+    await enforceNoCanvasIfNeeded();
     return;
   }
 
