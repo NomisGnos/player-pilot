@@ -57,6 +57,7 @@ const OWNER = 3;
 const CORE_ICON_ROOT = "icons/svg";
 const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
+const MANAGED_NO_CANVAS_RELOAD_KEY = `${MODULE_ID}.managedCoreNoCanvasReloadAt`;
 const GM_MAP_TOGGLE_POSITION_KEY = `${MODULE_ID}.gmMapTogglePosition`;
 export const SUPPORT_URL = "https://www.patreon.com/cw/nomisDM";
 const BOOT_MIN_VISIBLE_MS = 1800;
@@ -66,6 +67,7 @@ const BOOT_INITIAL_DRIFT_MS = 18000;
 const BOOT_MIN_DRIFT_MS = 30000;
 const BOOT_MAX_DRIFT_MS = 60000;
 const STARTUP_NOTICE_LIFETIME_MS = 10000;
+let noCanvasNeedsReload = false;
 
 const bootState = {
   enabled: false,
@@ -109,6 +111,36 @@ function storedWorldSetting(key, fallback) {
     return parseStoredSettingValue(document, fallback);
   } catch (_err) {
     return fallback;
+  }
+}
+
+function clientSettingStorage() {
+  return globalThis.game?.settings?.storage?.get?.('client') ?? globalThis.window?.localStorage ?? null;
+}
+
+function readClientStorageValue(storage, key, fallback = null) {
+  try {
+    const value = storage?.getItem?.(key);
+    return parseStoredSettingValue(value, fallback);
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function writeClientStorageValue(storage, key, value) {
+  try {
+    storage?.setItem?.(key, String(value));
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function removeClientStorageValue(storage, key) {
+  try {
+    storage?.removeItem?.(key);
+  } catch (_err) {
+    // best effort
   }
 }
 
@@ -172,17 +204,21 @@ function earlyUserIsPilot(user = earlyCurrentUser()) {
 
 function syncManagedNoCanvas(enabled) {
   try {
-    const storage = globalThis.game?.settings?.storage?.get?.('client') ?? globalThis.window?.localStorage;
+    const storage = clientSettingStorage();
     if (!storage) return;
-    const managed = storage.getItem(MANAGED_NO_CANVAS_KEY) === 'true';
+    const managed = readClientStorageValue(storage, MANAGED_NO_CANVAS_KEY, false) === true;
     if (enabled) {
-      if (!managed && storage.getItem('core.noCanvas') !== 'true') {
-        storage.setItem('core.noCanvas', 'true');
-        storage.setItem(MANAGED_NO_CANVAS_KEY, 'true');
+      if (readClientStorageValue(storage, 'core.noCanvas', false) !== true) {
+        writeClientStorageValue(storage, 'core.noCanvas', true);
+        writeClientStorageValue(storage, MANAGED_NO_CANVAS_KEY, true);
+        noCanvasNeedsReload = true;
+      } else if (!managed) {
+        writeClientStorageValue(storage, MANAGED_NO_CANVAS_KEY, true);
       }
     } else if (managed) {
-      storage.setItem('core.noCanvas', 'false');
-      storage.removeItem(MANAGED_NO_CANVAS_KEY);
+      writeClientStorageValue(storage, 'core.noCanvas', false);
+      removeClientStorageValue(storage, MANAGED_NO_CANVAS_KEY);
+      removeClientStorageValue(storage, MANAGED_NO_CANVAS_RELOAD_KEY);
     }
   } catch (_err) {
     // The ready hook retains a registered-setting fallback.
@@ -647,6 +683,41 @@ function tokenImg(tokenDoc) {
   return tokenDoc?.texture?.src ?? tokenDoc?.img ?? tokenDoc?.actor?.img ?? "icons/svg/mystery-man.svg";
 }
 
+function tokenDocumentFromCanvasToken(token) {
+  return token?.document ?? token ?? null;
+}
+
+function canvasTokenIsViewed(token) {
+  const tokenDoc = tokenDocumentFromCanvasToken(token);
+  if (!tokenDoc || tokenDoc.hidden) return false;
+  if (token !== tokenDoc) {
+    if (token?.destroyed === true) return false;
+    if ("visible" in token && token.visible === false) return false;
+    if ("renderable" in token && token.renderable === false) return false;
+    if (Number(token?.alpha) === 0) return false;
+  }
+  return true;
+}
+
+function viewedTokenDocumentsForScene(scene = getSceneDoc()) {
+  const sceneId = String(scene?.id ?? "");
+  const placeables = asArray(canvas?.tokens?.placeables)
+    .filter(canvasTokenIsViewed)
+    .map(tokenDocumentFromCanvasToken)
+    .filter((tokenDoc) => tokenDoc && !tokenDoc.hidden)
+    .filter((tokenDoc) => !sceneId || String(tokenDoc.parent?.id ?? sceneId) === sceneId);
+  if (placeables.length) {
+    const seen = new Set();
+    return placeables.filter((tokenDoc) => {
+      const id = String(tokenDoc.id ?? "");
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+  return asArray(scene?.tokens).filter((tokenDoc) => !tokenDoc.hidden);
+}
+
 function actorOwnedByUser(actor, userId = game.user?.id) {
   if (!actor) return false;
   const uid = String(userId ?? "").trim();
@@ -692,8 +763,7 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
     .map((token) => String(token.id ?? token.document?.id ?? ""))
     .filter(Boolean);
   const manualTargets = manualTargetList(sceneId);
-  const tokens = asArray(scene.tokens)
-    .filter((td) => !td.hidden)
+  const tokens = viewedTokenDocumentsForScene(scene)
     .map((td) => ({
       id: td.id,
       name: td.name ?? td.actor?.name ?? "Token",
@@ -1319,8 +1389,18 @@ async function enforceNoCanvasIfNeeded() {
   if (setting("useNoCanvas", true) !== true) return;
   document.body?.classList?.add?.("player-pilot-active");
   try {
-    if (game.settings.get("core", "noCanvas") !== true) {
+    const storage = clientSettingStorage();
+    const storedNoCanvas = readClientStorageValue(storage, "core.noCanvas", false) === true;
+    const foundryNoCanvas = game.settings.get("core", "noCanvas") === true;
+    if (foundryNoCanvas || (storedNoCanvas && !noCanvasNeedsReload)) return;
+    if (!storedNoCanvas) {
       await game.settings.set("core", "noCanvas", true);
+      writeClientStorageValue(storage, MANAGED_NO_CANVAS_KEY, true);
+      noCanvasNeedsReload = true;
+    }
+    const lastReloadAt = Number(readClientStorageValue(storage, MANAGED_NO_CANVAS_RELOAD_KEY, 0) ?? 0);
+    if (noCanvasNeedsReload && !lastReloadAt) {
+      writeClientStorageValue(storage, MANAGED_NO_CANVAS_RELOAD_KEY, Date.now());
       foundry.utils.debouncedReload();
     }
   } catch (err) {
@@ -5252,16 +5332,20 @@ async function moveActiveToken(dir) {
   }
   const actor = currentActor();
   const token = activeTokenForActor(actor?.id);
-  if (!actor || !token) {
+  if (!actor) {
+    ui.notifications?.warn?.("No owned actor found for this user.");
+    return;
+  }
+  if (!token && canvas?.ready) {
     ui.notifications?.warn?.("No owned token found in the current scene.");
     return;
   }
   const sceneId = state.scene?.id ?? "";
-  const payload = { actorId: actor.id, tokenId: token.id, sceneId, dir };
+  const payload = { actorId: actor.id, tokenId: token?.id ?? state.selectedTokenId ?? "", sceneId, dir };
   const authority = String(setting("movementAuthority", "playerFirst"));
-  if (authority === "playerFirst") {
+  if (authority === "playerFirst" && canvas?.ready) {
     try {
-      const result = await moveTokenDocument(payload);
+      const result = await moveTokenDocument(payload, { showRuler: true });
       updatePlayerMovementStatus({ ...result, sceneId, tokenId: token.id }, dir);
       state.lastMoveDir = dir;
       addLog(state.lastMoveLabel);
@@ -5294,10 +5378,11 @@ async function moveActiveToken(dir) {
   queueRender();
 }
 
-async function moveTokenDocument({ tokenId, sceneId, dir }) {
+async function moveTokenDocument({ tokenId, sceneId, dir }, options = {}) {
   const scene = getSceneDoc(sceneId);
   const tokenDoc = scene?.tokens?.get?.(tokenId) ?? asArray(scene?.tokens).find((td) => td.id === tokenId);
   if (!tokenDoc) throw new Error("Token not found.");
+  if (!canvas?.ready) throw new Error("Canvas movement is required so walls and terrain can be enforced.");
   const grid = Number(canvas?.grid?.size ?? state.scene?.gridSize ?? scene.grid?.size ?? 100);
   const directions = new Set(String(dir ?? "").toLowerCase().split(/[-_\s]+/).filter(Boolean));
   const dx = (directions.has("left") ? -1 : directions.has("right") ? 1 : 0) * grid;
@@ -5314,22 +5399,63 @@ async function moveTokenDocument({ tokenId, sceneId, dir }) {
   if (target.x === previous.x && target.y === previous.y) {
     return { moved: false, distanceFeet: 0, units: String(scene?.grid?.units ?? state.scene?.gridUnits ?? "ft"), previous, target };
   }
-  if (typeof tokenDoc.move === "function" && canvas?.ready) {
-    await tokenDoc.move(target, {
-      showRuler: true,
-      constrainOptions: { ignoreWalls: true, ignoreCost: true }
-    });
+  let moveResult = null;
+  if (typeof tokenDoc.move === "function") {
+    moveResult = await tokenDoc.move(target, { showRuler: options.showRuler === true });
   } else {
-    await tokenDoc.update(target);
+    throw new Error("Constrained token movement is unavailable.");
   }
-  const distanceFeet = movementDistanceFeet(tokenDoc, previous, target, scene, grid);
+  const actual = await resolveMovedTokenPosition(tokenDoc, previous, target, moveResult);
+  if (actual.x === previous.x && actual.y === previous.y) {
+    return { moved: false, distanceFeet: 0, units: String(scene?.grid?.units ?? state.scene?.gridUnits ?? "ft"), previous, target: actual };
+  }
+  const distanceFeet = movementDistanceFeet(tokenDoc, previous, actual, scene, grid);
   return {
     moved: true,
     distanceFeet,
     units: String(scene?.grid?.units ?? state.scene?.gridUnits ?? "ft"),
     previous,
-    target
+    target: actual
   };
+}
+
+function tokenPositionFromDocument(tokenDoc) {
+  const liveDoc = tokenDoc?.parent?.tokens?.get?.(tokenDoc.id) ?? tokenDoc;
+  const x = Number(liveDoc?.x);
+  const y = Number(liveDoc?.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function tokenPositionFromMoveResult(moveResult) {
+  const candidates = [
+    moveResult?.document,
+    moveResult?.token,
+    moveResult
+  ];
+  for (const candidate of candidates) {
+    const x = Number(candidate?.x);
+    const y = Number(candidate?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  }
+  return null;
+}
+
+async function resolveMovedTokenPosition(tokenDoc, previous, _target, moveResult) {
+  const changed = (point) => point && (point.x !== previous.x || point.y !== previous.y);
+  const returned = tokenPositionFromMoveResult(moveResult);
+  if (changed(returned)) return returned;
+  const immediate = tokenPositionFromDocument(tokenDoc);
+  if (changed(immediate)) return immediate;
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const latest = tokenPositionFromDocument(tokenDoc);
+      if (!changed(latest) && Date.now() - startedAt < 600) return;
+      window.clearInterval(timer);
+      resolve(changed(latest) ? latest : previous);
+    }, 25);
+  });
 }
 
 function movementDistanceFeet(tokenDoc, previous, target, scene, grid) {
@@ -5411,6 +5537,23 @@ function updatePlayerMovementStatus(result, dir = "") {
     state.lastMoveDir = "";
     queueRender();
   }, MOVEMENT_DISPLAY_MS);
+}
+
+function applyMovementToSceneState(result = {}) {
+  const sceneId = String(result?.sceneId ?? "");
+  if (sceneId && sceneId !== String(state.scene?.id ?? "")) return;
+  const tokenId = String(result?.tokenId ?? "");
+  if (!tokenId || !state.scene?.tokens) return;
+  const token = state.scene.tokens.find?.((entry) => String(entry.id ?? "") === tokenId);
+  if (!token) return;
+  const target = result?.target ?? null;
+  const x = Number(target?.x);
+  const y = Number(target?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  token.x = x;
+  token.y = y;
+  state.selectedTokenId = tokenId;
+  state.sceneFingerprint = sceneStateFingerprint(state.scene);
 }
 
 function measureMovementPathFromSceneState(points = []) {
@@ -5630,8 +5773,10 @@ function drawMovementFeedback(tokenDoc, previous, target, distanceFeet) {
 }
 
 function requestMapSnapshot() {
+  const token = activeTokenForActor();
   if (!sendSocket("mapSnapshotRequest", {
     actorId: state.actorId,
+    tokenId: token?.id ?? state.selectedTokenId ?? "",
     sceneId: state.scene?.id ?? ""
   })) {
     ui.notifications?.warn?.("No GM is connected for Ping On Map.");
@@ -5734,9 +5879,12 @@ async function handlePlayerSocket(data) {
   }
   if (data.type === "commandResult") {
     if (data.movement && typeof data.movement === "object") {
+      applyMovementToSceneState(data.movement);
       updatePlayerMovementStatus(data.movement, String(data.dir ?? ""));
+      queueRender();
     } else if (String(data.message ?? "").toLowerCase().startsWith("moved") || String(data.message ?? "").toLowerCase().includes("blocked")) {
       state.lastMoveLabel = data.message ?? "";
+      queueRender();
     }
     addLog(data.message ?? "Done");
     return;
@@ -5801,16 +5949,20 @@ async function handleGmSocket(data) {
   }
   if (data.type === "moveToken") {
     try {
-      const result = await moveTokenDocument(data);
-      const burst = recordGmMovementBurst(data, result);
+      const tokenDoc = tokenDocForPilotRequest(data);
+      const moveData = tokenDoc
+        ? { ...data, tokenId: tokenDoc.id, sceneId: tokenDoc.parent?.id ?? data.sceneId }
+        : data;
+      const result = await moveTokenDocument(moveData, { showRuler: false });
+      const burst = recordGmMovementBurst(moveData, result);
       sendSocket("commandResult", {
         targetUserIds: [data.userId],
         message: movementResultLabel({ ...result, totalDistance: burst?.totalDistance }, data.dir),
         dir: data.dir,
         movement: {
           ...result,
-          sceneId: String(data.sceneId ?? ""),
-          tokenId: String(data.tokenId ?? ""),
+          sceneId: String(moveData.sceneId ?? ""),
+          tokenId: String(moveData.tokenId ?? ""),
           totalDistance: Number(burst?.totalDistance ?? result.distanceFeet ?? 0)
         }
       });
@@ -5819,7 +5971,6 @@ async function handleGmSocket(data) {
       sendSocket("commandResult", { targetUserIds: [data.userId], message: "Move failed" });
       ui.notifications?.error?.("Player Pilot: Move failed.");
     }
-    sendSceneState(data.userId);
     return;
   }
   if (data.type === "movementTrace") {
@@ -6304,24 +6455,43 @@ function activateCanvasControl(control = "token", tool = "select") {
   }
 }
 
-function selectSnapshotTokenForPlayer(data = {}) {
-  const scene = getSceneDoc(data.sceneId) ?? game.scenes?.viewed ?? canvas?.scene;
+function sceneForPilotTokenRequest(data = {}) {
+  const viewedScene = canvas?.scene ?? game.scenes?.viewed ?? null;
+  const requestedScene = getSceneDoc(data.sceneId);
+  return requestedScene && viewedScene && String(requestedScene.id ?? "") === String(viewedScene.id ?? "")
+    ? requestedScene
+    : (viewedScene ?? requestedScene);
+}
+
+function tokenDocForPilotRequest(data = {}) {
+  const scene = sceneForPilotTokenRequest(data);
   const userId = String(data.userId ?? "");
+  const tokenId = String(data.tokenId ?? "");
   const actorId = String(data.actorId ?? "");
+  const user = game.users?.get?.(userId) ?? null;
+  const characterId = String(user?.character?.id ?? user?.characterId ?? "");
+  const tokens = viewedTokenDocumentsForScene(scene);
+  const actorForToken = (token) => token?.actor ?? game.actors?.get?.(token?.actorId) ?? null;
+  const tokenActorId = (token) => String(token?.actorId ?? token?.actor?.id ?? "");
+  return tokens.find((token) => tokenId && String(token.id ?? "") === tokenId)
+    ?? tokens.find((token) => actorId && tokenActorId(token) === actorId)
+    ?? tokens.find((token) => characterId && tokenActorId(token) === characterId)
+    ?? tokens.find((token) => actorOwnedByUser(actorForToken(token), userId))
+    ?? null;
+}
+
+function selectSnapshotTokenForPlayer(data = {}) {
+  const tokenDoc = tokenDocForPilotRequest(data);
   const controlState = captureCanvasControlState();
   const previousTokenIds = asArray(canvas?.tokens?.controlled).map((token) => String(token.id ?? token.document?.id ?? "")).filter(Boolean);
-  const tokens = asArray(scene?.tokens);
-  const ownerLevel = Number(CONST?.DOCUMENT_OWNERSHIP_LEVELS?.OWNER ?? OWNER);
-  const tokenDoc = tokens.find((token) => String(token.actorId ?? token.actor?.id ?? "") === actorId && !token.hidden)
-    ?? tokens.find((token) => Number((token.actor ?? game.actors?.get?.(token.actorId))?.ownership?.[userId] ?? 0) >= ownerLevel && !token.hidden)
-    ?? null;
   const token = tokenDoc ? (canvas?.tokens?.get?.(tokenDoc.id) ?? tokenDoc.object) : null;
   let selected = false;
   try {
     activateCanvasControl("token", "select");
     canvas?.tokens?.releaseAll?.();
     token?.control?.({ releaseOthers: true });
-    selected = token?.controlled === true;
+    selected = token?.controlled === true
+      || asArray(canvas?.tokens?.controlled).some((controlled) => String(controlled.id ?? controlled.document?.id ?? "") === String(tokenDoc?.id ?? ""));
   } catch (_err) {
     selected = false;
   }
