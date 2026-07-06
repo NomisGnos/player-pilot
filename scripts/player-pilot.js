@@ -625,7 +625,7 @@ function getOwnedActors() {
   });
 }
 
-function currentActor() {
+export function currentActor() {
   const actors = getOwnedActors();
   if (!actors.length) return null;
   if (!state.actorId) state.actorId = setting("lastActorId", "");

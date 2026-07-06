@@ -12,6 +12,7 @@ import {
 import {
   actorHasActiveTurn,
   addLog,
+  currentActor,
   executePlayerFirst,
   invalidateModelCache,
   queueRender,
@@ -20,6 +21,7 @@ import {
 import {
   asArray,
   capitalizeWords,
+  clamp,
   d20Formula,
   fieldText,
   mergeTabs,
