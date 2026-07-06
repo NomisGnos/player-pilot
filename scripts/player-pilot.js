@@ -32,7 +32,7 @@ import {
   pf2eTraits
 } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
-import { SWADE_ADAPTER, SWADE_QUICK_FILTERS } from "./swade.js";
+import { SWADE_ADAPTER, SWADE_QUICK_FILTERS, normalizeSwadeItem } from "./swade.js";
 import {
   asArray,
   capitalizeWords,
@@ -896,6 +896,7 @@ function preparedUpdateData(item, prepared) {
 function normalizeItemForAdapter(item, adapter = systemAdapter(item?.actor)) {
   if (adapter?.id === "pf2e") return normalizePf2eItem(item);
   if (adapter?.id === "dnd5e") return normalizeItem(item);
+  if (adapter?.id === "swade") return normalizeSwadeItem(item);
   return normalizeGenericItem(item);
 }
 
@@ -3084,7 +3085,7 @@ function openUseDialog(itemId, flowOptions = {}) {
   const targetInfoFor = (activityId = "") => adapter.targetInfo?.(item, activityId) ?? itemTargetInfo(item, activityId);
   const rangeFeetFor = (activityId = "") => adapter.rangeFeet?.(item, activityId) ?? getItemRangeFeet(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
-  let targetStep = targetInfo.needsTarget;
+  let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
   const spellStep = item.type === "spell" && (adapter.id !== "pf2e" || slots.length > 0);
   clearUseTargets();
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
@@ -3225,7 +3226,7 @@ function openUseDialog(itemId, flowOptions = {}) {
     nextActivityStep: async (modal) => {
       const { options } = refreshRollInstructions(modal);
       targetInfo = targetInfoFor(options.activityId);
-      targetStep = targetInfo.needsTarget;
+      targetStep = targetInfo.needsTarget || targetInfo.canTarget;
       modal.querySelector("[data-use-step='activity']")?.classList?.add?.("hidden");
       modal.querySelector("[data-modal-action='nextActivityStep']")?.classList?.add?.("hidden");
       const targetSummary = modal.querySelector("[data-modal-target-summary]");
@@ -3576,7 +3577,7 @@ function updateModalTargetCount(selected, targetInfo = {}) {
 }
 
 function renderModalTargetPicker(item) {
-  if (!item?.targetInfo?.needsTarget) return "";
+  if (!item?.targetInfo?.needsTarget && !item?.targetInfo?.canTarget) return "";
   const scene = state.scene;
   const tokens = displayedTargetTokens(scene).filter((token) => item.targetInfo.allowSelf || token.actorId !== state.actorId);
   if (!tokens.length) return `<div class="pp-empty">No available targets. If no GM is connected, Player Pilot can only use the locally available scene data.</div>`;
@@ -4549,7 +4550,7 @@ async function openPf2eStrikeFlowDialog(strikeModel, strikeData) {
   const targetInfo = strikeModel.targetInfo;
   clearUseTargets();
   const canPickTargets = displayedTargetTokens(state.scene).some((token) => targetInfo.allowSelf || token.actorId !== state.actorId);
-  const targetStep = targetInfo.needsTarget && canPickTargets;
+  const targetStep = (targetInfo.needsTarget || targetInfo.canTarget) && canPickTargets;
   const rollInstructions = await renderPf2eStrikeRollInstructions(strikeModel, strikeData);
   openModal(`
     <h2>Strike with ${escapeHtml(strikeModel.name)}</h2>
