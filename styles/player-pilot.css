@@ -1476,6 +1476,11 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   background: linear-gradient(180deg, #20272e, #14191f);
 }
 
+.pp-hp-panel.pp-fatigue {
+  background: linear-gradient(180deg, #2b2b1b, #161612);
+  border-color: rgba(225, 229, 101, 0.55);
+}
+
 .pp-hp-copy {
   display: flex;
   align-items: baseline;
