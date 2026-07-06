@@ -1,0 +1,8 @@
+<nav class="pp-tabs {{#if state.navOpen}}open{{/if}}" aria-label="Player Pilot tabs">
+  {{#each tabs as |tab|}}
+    <button class="pp-tab" type="button" data-action="changeTab" data-tab="{{tab.id}}" aria-selected="{{tab.active}}">
+      {{{tab.icon}}}
+      <span>{{localize tab.label}}</span>
+    </button>
+  {{/each}}
+</nav>

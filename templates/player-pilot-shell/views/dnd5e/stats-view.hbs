@@ -1,0 +1,65 @@
+<main class="pp-body">
+  <section class="pp-view pp-stats-page pp-system-dnd5e tab {{#if (eq activeTab.key 'stats')}}active{{/if}}" data-tab="stats">
+    <div class="pp-section">
+      {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.adapter.label}}
+
+      {{!-- HP Bar --}}
+      <div class="pp-hp-panel pp-compact-card">
+        <div class="pp-hp-copy">
+          <span><i class="fas fa-heart-pulse"></i> HP</span>
+          <strong>{{summary.hp.display}}</strong>
+          {{#if summary.hp.temp}}<em>Temporary {{summary.hp.temp}}</em>{{/if}}
+        </div>
+        <div class="pp-hp-track" aria-label="Hit points">
+          <div class="pp-hp-fill" style="width:{{summary.hp.pct}}%"></div>
+          {{#if summary.hp.temp}}
+            <div class="pp-hp-temp" style="width:{{summary.hp.tempWidth}}%"></div>
+          {{/if}}
+        </div>
+        {{#if summary.hitDice}}
+          <div class="pp-hit-dice"><i class="fas fa-dice"></i><span>Hit Dice</span><strong>{{summary.hitDice}}</strong></div>
+        {{/if}}
+      </div>
+
+      <div class="pp-initiative-strip">
+        <i class="fas fa-flag-checkered"></i>
+        <span>Initiative Modifier</span>
+        <strong>{{summary.initiative}}</strong>
+        <button class="pp-initiative-roll" type="button" data-action="rollInitiative" title="{{initiativeRollText}}">
+          {{{d20Icon}}}
+        </button>
+      </div>
+
+      <div class="pp-status-grid">
+        {{#each statCards}}
+          {{>"modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs" this}}
+        {{/each}}
+      </div>
+
+      <div class="pp-detail-strips">
+        <div class="pp-detail-strip pp-exhaustion-strip">
+          <i class="fas fa-triangle-exclamation"></i>
+          <span>Exhaustion</span>
+          <button type="button" data-action="exhaustion" data-delta="-1" title="Lower exhaustion"><i class="fas fa-minus"></i></button>
+          <strong>{{summary.exhaustionValue}}</strong>
+          <button type="button" data-action="exhaustion" data-delta="1" title="Raise exhaustion"><i class="fas fa-plus"></i></button>
+        </div>
+      </div>
+
+      <div class="pp-ability-grid">
+        {{#each summary.abilities}}
+          <div class="pp-ability-score">
+            <span class="pp-ability-label"><i class="fas {{icon}}"></i><span>{{label}}</span></span>
+            <strong>{{score}}</strong>
+            <em><small>Modifier</small>{{mod}}</em>
+          </div>
+        {{/each}}
+      </div>
+
+      <div class="pp-rest-row">
+        <button class="pp-button" type="button" data-action="dnd5eRest" data-rest="short">Short Rest</button>
+        <button class="pp-button" type="button" data-action="dnd5eRest" data-rest="long">Long Rest</button>
+      </div>
+    </div>
+  </section>
+</main>
