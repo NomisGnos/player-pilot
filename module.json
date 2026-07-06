@@ -45,6 +45,5 @@
   "download": "https://github.com/NomisGnos/player-pilot/releases/download/0.2.15/module.zip",
   "readme": "https://github.com/NomisGnos/player-pilot/blob/main/README.md",
   "bugs": "https://github.com/NomisGnos/player-pilot/issues",
-  "changelog": "https://github.com/NomisGnos/player-pilot/blob/main/CHANGELOG.md",
-  "flags": {}
+  "changelog": "https://github.com/NomisGnos/player-pilot/blob/main/CHANGELOG.md"
 }

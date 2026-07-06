@@ -1046,7 +1046,7 @@ class PlayerPilotSupportPanel extends FormApplication {
     return foundry.utils.mergeObject(super.defaultOptions, {
       id: "player-pilot-support",
       title: "Support Player Pilot",
-      template: "modules/player-pilot/templates/support-panel.html",
+      template: "modules/player-pilot/templates/support-panel.hbs",
       width: 420,
       height: "auto",
       closeOnSubmit: true
@@ -1228,7 +1228,7 @@ async function registerHandlebarsHelpers() {
   Handlebars.registerHelper("isQuickFilterActive", function (filter, options) {
     return (filter === "all" && !options.data.root.selectedFilters.size) ||
       options.data.root.activeFilter === filter ||
-      options.data.root.selectedFilters.find(f => f.key === filter);
+      options.data.root.selectedFilters.has(filter);
   });
 }
 

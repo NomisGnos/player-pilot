@@ -83,6 +83,8 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
   constructor(options = {}) {
     super(options);
+    this._onShellScroll = this.updateScrollTopButton.bind(this);
+    this._scrollListenerElement = null;
   }
 
   _configureRenderParts(options) {
@@ -127,7 +129,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     if (!availableTabs.some(t => t.key === state.activeTab)) state.activeTab = "actions";
     const activeTab = availableTabs.find(t => t.key === state.activeTab);
 
-    const initiativeRollText = model.adapter.id === " pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
+    const initiativeRollText = model.adapter.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
 
     const statCards = sysAdapter.statCards(model);
     const inventoryGroups = sysAdapter.inventoryGroups(model);
@@ -160,10 +162,20 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
     this.element.classList.toggle("pp-paused", !!game.paused);
 
-    this.element.addEventListener("scroll", e => this.updateScrollTopButton(), true);
+    if (this._scrollListenerElement !== this.element) {
+      this._scrollListenerElement?.removeEventListener("scroll", this._onShellScroll, true);
+      this.element.addEventListener("scroll", this._onShellScroll, true);
+      this._scrollListenerElement = this.element;
+    }
 
     this.updateScrollTopButton();
     applySearchFilter();
+  }
+
+  _onClose(options) {
+    this._scrollListenerElement?.removeEventListener("scroll", this._onShellScroll, true);
+    this._scrollListenerElement = null;
+    return super._onClose(options);
   }
 
   getCurrentActor(ownedActors) {
