@@ -279,6 +279,16 @@ export const SWADE_ACTIONS = {
       actor.update({ [dataKey]: newPP });
     }
   },
+  swadeRoll: async function (event, button) {
+    const actor = this.currentActor;
+    if (!actor) return;
+
+    if (button.dataset.kind === "skill") {
+      actor.rollSkill(button.dataset.traitId);
+    } else if (button.dataset.kind === "attribute") {
+      actor.rollAttribute(button.dataset.traitId);
+    }
+  },
 };
 
 export const SWADE_QUICK_FILTERS = {
