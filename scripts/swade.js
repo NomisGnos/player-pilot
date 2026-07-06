@@ -1,3 +1,4 @@
+import { rollActorEntry } from "./dnd5e.js";
 import {
   GENERIC_ADAPTER,
   normalizeItem,
@@ -138,13 +139,11 @@ export const SWADE_ADAPTER = {
     return true;
   },
   async useItem(actor, item, options = {}) {
-    await game.brsw.create_item_card(actor, item.id);
-  },
-  async rollCheck(actor, kind, key) {
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: `<p><strong>${escapeHtml(actor.name)}</strong> requested ${escapeHtml(kind)} ${escapeHtml(key)}.</p>`
-    });
+    if (game.brsw) {
+      game.brsw.create_item_card(actor, item.id);
+    } else {
+      await item.show();
+    }
   },
   statCards(model) {
     if (!model) return [];
@@ -209,6 +208,9 @@ export const SWADE_ADAPTER = {
       return a.name.localeCompare(b.name);
     }));
     return sortedGroups;
+  },
+  targetInfo(item) {
+    return swadeTargetInfo(item);
   },
   TABS: mergeTabs(GENERIC_ADAPTER.TABS, [
     {
@@ -322,7 +324,7 @@ function attributes(actor) {
   const source = actor?.system?.attributes ?? {};
   return Object.entries(source).slice(0, 6).map(([key, data]) => ({
     key,
-    label: globalThis.CONFIG?.SWADE?.attributes?.[key].short,
+    label: CONFIG.SWADE.attributes[key].short,
     die: renderDieGlyph(data.die.sides, "pp-swade-die"),
     mod: data.die.modifier < 0 ? String(data.die.modifier) : `+${data.die.modifier}`,
   }));
@@ -352,7 +354,33 @@ export function normalizeSwadeItem(item, group = "items") {
     normalized.img = item.img;
     normalized.attribute = capitalizeWords(item.system.attribute);
   }
+
+  normalized.targetInfo = swadeTargetInfo(item);
+
   return normalized;
+}
+
+function itemHasDamage(item) {
+  if (item.system.damage) return true;
+  if (!item.system.actions?.additional) return false;
+  return Object.values(item.system.actions?.additional).some(a=> a.type === "damage" && a.override);
+}
+
+function swadeTargetInfo(item) {
+  const targetInfo = {
+    count: 0,
+    needsTarget: false,
+    canTarget: false,
+    allowSelf: true,
+  };
+  if (!item) return targetInfo;
+
+  const dealsDamage = itemHasDamage(item);
+  targetInfo.needsTarget = dealsDamage;
+  targetInfo.canTarget = item.type === "power";
+  targetInfo.count = 0;
+
+  return targetInfo;
 }
 
 function isInventoryItem(item) {
