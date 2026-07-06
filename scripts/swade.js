@@ -60,6 +60,17 @@ export const SWADE_ADAPTER = {
       }
     }
 
+    const powerPoints = Object.entries(system.powerPoints).filter(([key, values]) => {
+      return values.max > 0 && powerFilters.some(f => f.key === key);
+    })
+      .map(([key, values]) => ({
+        key,
+        name: key === "general" ? "General" : key,
+        value: values.value,
+        max: values.max
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
     return {
       name: actor?.name ?? "Actor",
       type: actor?.type ?? "",
@@ -112,6 +123,7 @@ export const SWADE_ADAPTER = {
       powers: Array.from(powers.values()),
       powersCount,
       powerFilters: powerFilters,
+      powerPoints,
     };
   },
   groups(actor) {
@@ -242,9 +254,29 @@ export const SWADE_ACTIONS = {
     if (!actor) return;
 
     if (button.dataset.delta > 0) {
-      await this.actor.getBenny();
+      await actor.getBenny();
     } else {
-      await this.actor.spendBenny();
+      await actor.spendBenny();
+    }
+  },
+  powerPoints: async function (event, button) {
+    const actor = this.currentActor;
+    if (!actor) return;
+    const delta = Number(button.dataset.delta);
+    if (!delta) return;
+
+    const currentPP = actor.system.powerPoints[button.dataset.arcane].value;
+    const maxPP = actor.system.powerPoints[button.dataset.arcane].max;
+    const dataKey = `system.powerPoints.${button.dataset.arcane}.value`;
+
+    if (delta > 0) {
+      if (currentPP >= maxPP) return;
+      const newPP = Math.min(currentPP + delta, maxPP);
+      actor.update({ [dataKey]: newPP });
+    } else {
+      if (currentPP === 0) return;
+      const newPP = Math.max(currentPP + delta, 0);
+      actor.update({ [dataKey]: newPP });
     }
   },
 };

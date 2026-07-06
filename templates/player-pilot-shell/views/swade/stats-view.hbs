@@ -44,6 +44,22 @@
         {{/each}}
       </div>
 
+      <div class="pp-detail-strips">
+        {{#each summary.powerPoints}}
+          <div class="pp-detail-strip pp-pp-strip">
+            <i class="fas fa-sparkles"></i>
+            {{#if (eq ../summary.powerPoints.length 1)}}
+              <span>Power Points</span>
+            {{else}}
+              <span>{{name}} PP</span>
+            {{/if}}
+            <button type="button" data-action="powerPoints" data-arcane="{{key}}" data-delta="-1" title="Spend PP"><i class="fas fa-minus"></i></button>
+            <strong>{{value}} / {{max}}</strong>
+            <button type="button" data-action="powerPoints" data-arcane="{{key}}" data-delta="1" title="Gain PP"><i class="fas fa-plus"></i></button>
+          </div>
+        {{/each}}
+      </div>
+
       <div class="pp-swade-attribute-grid">
         {{#each summary.attributes}}
           <div class="pp-swade-attribute">

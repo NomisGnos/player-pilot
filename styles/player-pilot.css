@@ -3993,7 +3993,8 @@ button.pp-card-img.pp-card-info-btn {
   border-color: rgba(229, 107, 101, 0.5);
 }
 
-.pp-exhaustion-strip {
+.pp-exhaustion-strip
+.pp-pp-strip {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 }
 
