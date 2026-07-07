@@ -7,16 +7,13 @@ import {
   isMultiFilterKey,
   openPf2eInitiativeDialog,
   queueRender,
-  quickFilterFor,
   renderDieGlyph,
   renderInterfaceIcon,
   rollCheck,
   selectedQuickFilters,
   setting,
   state,
-  systemAdapter,
 } from "./player-pilot.js";
-import { SWADE_ACTIONS } from "./swade.js";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) {
@@ -62,15 +59,12 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       },
       rollInitiative: async function (event, button) {
         const model = cachedModel(this.currentActor);
-        if (model.adapter.id === "pf2e") {
+        if (model.id === "pf2e") {
           openPf2eInitiativeDialog();
         } else {
           await rollCheck("initiative", "initiative");
         }
       },
-      ...DND5E_ACTIONS,
-      ...PF2E_ACTIONS,
-      ...SWADE_ACTIONS,
     },
   };
 
@@ -94,8 +88,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     this.currentActor = this.getCurrentActor(ownedActors);
 
     if (this.currentActor) {
-      const sysAdapter = systemAdapter();
-      const activeTab = sysAdapter.TABS.find(t => t.key === state.activeTab);
+      const activeTab = game.playerPilot.model.getTab(state.activeTab);
       parts.body.template = activeTab.viewTemplate;
     } else {
       parts.body.template = "modules/player-pilot/templates/player-pilot-shell/views/no-player-view.hbs";
@@ -121,21 +114,20 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
     const ownedActors = game.actors.filter(a => a.isOwner);
 
-    const sysAdapter = systemAdapter();
-    const model = cachedModel(this.currentActor);
-    const summary = model.summary;
+    const model = game.playerPilot.model;
+    model.refreshCache(this.currentActor);
 
-    const availableTabs = sysAdapter.filterAvailableTabs(sysAdapter.TABS, summary);
-    if (!availableTabs.some(t => t.key === state.activeTab)) state.activeTab = "actions";
-    const activeTab = availableTabs.find(t => t.key === state.activeTab);
+    const availableTabs = model.filterAvailableTabs();
+    let activeTab = model.getTab(state.activeTab);
+    if (!activeTab) {
+      state.activeTab = "actions";
+      activeTab = model.getTab(state.activeTab);
+    }
 
-    const initiativeRollText = model.adapter.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
+    const initiativeRollText = model.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
 
-    const statCards = sysAdapter.statCards(model);
-    const inventoryGroups = sysAdapter.inventoryGroups(model);
-
-    const activeFilter = quickFilterFor(state.activeTab);
-    const selectedFilters = new Set(selectedQuickFilters(state.activeTab));
+    const activeFilter = model.quickFilterFor(state.activeTab);
+    const selectedFilters = new Set(model.selectedQuickFilters(state.activeTab));
 
     return {
       availableTabs,
@@ -146,14 +138,13 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       currentActor: this.currentActor,
       state,
       model,
-      summary,
+      summary: model.summary,
       supportUrl: SUPPORT_URL,
       activeFilter,
       selectedFilters,
       initiativeRollText,
       d20Icon: renderDieGlyph(20),
-      statCards,
-      inventoryGroups,
+      statCards: model.summary.statCards,
     };
   }
 

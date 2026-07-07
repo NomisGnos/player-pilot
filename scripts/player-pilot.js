@@ -1,3 +1,4 @@
+import { BaseModel } from "./base-model.js";
 import { DND5E_ABILITIES, DND5E_ADAPTER, actorConcentrationEffects, applyPendingCastLevel, concentrationEffectLabel, dndSpellScalingIncrease } from "./dnd5e.js";
 import {
   CURRENCY_LABELS,
@@ -32,7 +33,7 @@ import {
   pf2eTraits
 } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
-import { SWADE_ADAPTER, SWADE_QUICK_FILTERS, normalizeSwadeItem } from "./swade.js";
+import { SWADE_QUICK_FILTERS, SwadeModel } from "./swade.js";
 import {
   asArray,
   capitalizeWords,
@@ -839,7 +840,6 @@ export function systemAdapter() {
   const id = String(game.system?.id ?? "").toLowerCase();
   if (id === "dnd5e") return DND5E_ADAPTER;
   if (id === "pf2e") return PF2E_ADAPTER;
-  if (id === "swade") return SWADE_ADAPTER;
   return GENERIC_ADAPTER;
 }
 
@@ -966,7 +966,7 @@ function preparedUpdateData(item, prepared) {
 function normalizeItemForAdapter(item, adapter = systemAdapter(item?.actor)) {
   if (adapter?.id === "pf2e") return normalizePf2eItem(item);
   if (adapter?.id === "dnd5e") return normalizeItem(item);
-  if (adapter?.id === "swade") return normalizeSwadeItem(item);
+  if (adapter?.id === "swade") return game.playerPilot.model.normalizeItem(item);
   return normalizeGenericItem(item);
 }
 
@@ -1844,7 +1844,7 @@ function renderFilterMenuButton(menu, keys, label = "Filters") {
 
 function renderActionsView(model) {
   const groups = model.groups.actionGroups ?? { action: model.groups.actions ?? [] };
-  const content = model.adapter.id === "pf2e"
+  const content = model.id === "pf2e"
     ? [
       ["One Action", groups.action1],
       ["Two Actions", groups.action2],
@@ -1853,7 +1853,7 @@ function renderActionsView(model) {
       ["Free Actions", groups.free],
       ["Passive", groups.passive],
       ["Other", groups.other]
-    ].map(([title, items]) => renderActionGroup(title, items, model.adapter.id)).join("")
+    ].map(([title, items]) => renderActionGroup(title, items, model.id)).join("")
     : `
       ${renderActionGroup("Actions", groups.action)}
       ${renderActionGroup("Bonus Actions", groups.bonus)}
@@ -2328,8 +2328,8 @@ function renderItemCard(item, { showSpellLevel = true, usesInControls = false } 
     : "";
   const equipButton = item.equippable
     ? (item.pf2e
-      ? `<button class="pp-carry-button" type="button" data-action="toggle-equipped" data-item-id="${escapeHtml(item.id)}" title="Change how ${escapeHtml(item.name)} is carried"><i class="fas fa-hand"></i><span>${escapeHtml(item.pf2e.carry?.label ?? "Carry")}</span></button>`
-      : `<button class="pp-state-switch pp-equip-switch ${item.equipped ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.equipped ? "true" : "false"}" data-action="toggle-equipped" data-item-id="${escapeHtml(item.id)}" title="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}" aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`)
+      ? `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="Change how ${escapeHtml(item.name)} is carried"><i class="fas fa-hand"></i><span>${escapeHtml(item.pf2e.carry?.label ?? "Carry")}</span></button>`
+      : `<button class="pp-state-switch pp-equip-switch ${item.equipped ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.equipped ? "true" : "false"}" data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}" aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`)
     : "";
   const useButton = canUse
     ? `<button class="pp-action-btn primary pp-use-compact" type="button" data-action="use-item" data-item-id="${escapeHtml(item.id)}">Use</button>`
@@ -4782,8 +4782,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
-  const adapter = systemAdapter(actor);
-  const canUseItem = adapter.canUseItem?.(actor, item) ?? itemCanBeUsed(item);
+  const canUseItem = game.playerPilot.model.canUseItem?.(actor, item) ?? game.playerPilot.model.itemCanBeUsed(item);
   if (!canUseItem) {
     const message = adapter.id === "pf2e" && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
@@ -4806,7 +4805,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   }
   await executePlayerFirst(
     `Use ${item.name}`,
-    async () => adapter.useItem(actor, item, options),
+    async () => game.playerPilot.model.useItem(actor, item, options),
     "useItem",
     {
       actorId: actor.id,
@@ -6206,7 +6205,7 @@ async function gmUseItem(data) {
       }
     }
   });
-  await withProxyTargetsForUser(data.userId, () => systemAdapter(actor).useItem(actor, item, data.options ?? {}));
+  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
 }
 
 async function gmRollCheck(data) {
@@ -7087,6 +7086,23 @@ function installPilotPromptObserver() {
   state.nativePromptObserver.observe(document.body, { childList: true });
 }
 
+function createSystemModel() {
+  if (game.system.id == "dnd5e") {
+    //game.playerPilot.model = new DnD5e();
+  } else if (game.system.id == "pf2e") {
+    //game.playerPilot.model = new PF2e();
+  } else if (game.system.id == "swade") {
+    game.playerPilot.model = new SwadeModel();
+  } else {
+    game.playerPilot.model = new BaseModel();
+  }
+
+  PlayerPilotShell.DEFAULT_OPTIONS.actions =
+    foundry.utils.mergeObject(
+      PlayerPilotShell.DEFAULT_OPTIONS.actions,
+      game.playerPilot.model.constructor.SHELL_ACTIONS);
+}
+
 function registerHooks() {
   Hooks.on("renderUserConfig", closePilotUserConfiguration);
   Hooks.on("renderApplicationV2", closePilotUserConfiguration);
@@ -7095,6 +7111,7 @@ function registerHooks() {
   Hooks.on("renderDialog", surfacePilotPrompt);
   Hooks.on("closeDialog", () => window.queueMicrotask(syncPilotPromptBackdrop));
   Hooks.once("init", async () => {
+    game.playerPilot ??= {};
     await loadTemplates();
     registerHandlebarsHelpers();
     registerSettings();
@@ -7110,6 +7127,9 @@ function registerHooks() {
     Hooks.on("canvasInit", () => {
       if (userIsPilot() && setting("useNoCanvas", true) === true) document.body?.classList?.add?.("player-pilot-active");
     });
+  });
+  Hooks.once("i18nInit", async () => {
+    createSystemModel();
   });
   Hooks.once("setup", () => {
     if (!userIsPilot()) {

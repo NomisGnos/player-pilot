@@ -191,6 +191,10 @@ export function readableReferenceLabel(raw) {
   return cleaned;
 }
 
+export function itemDisplayName(item) {
+  return cleanRulesText(item?.name ?? "Item") || "Item";
+}
+
 export function cleanFoundrySyntax(value) {
   return String(value ?? "")
     .replace(/\[\[(?:\/[a-z]+\s+)?([^\]]+)\]\]/gi, (_m, formula) => String(formula ?? "").replace(/\s+#.*$/, "").trim())

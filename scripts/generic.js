@@ -81,7 +81,7 @@ export const GENERIC_ADAPTER = {
       {
         key: "prof",
         icon: "pp-die-d20",
-        label: model.adapter.id === "pf2e" ? "Modifiers" : (model.adapter.id === "dnd5e" ? "Proficiency" : "System"),
+        label: model.id === "pf2e" ? "Modifiers" : (model.id === "dnd5e" ? "Proficiency" : "System"),
         value: model.summary.prof ?? model.summary.resource ?? "-"
       },
     ];
