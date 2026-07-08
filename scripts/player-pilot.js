@@ -1791,21 +1791,6 @@ function renderCheckGroups(checks = []) {
   }).join("");
 }
 
-function renderSpellSlots(slots = []) {
-  if (!slots.length) return "";
-  return `
-    <div class="pp-slots">
-      ${slots.map((slot) => `
-        <span class="pp-slot">
-          <i class="fas fa-gem"></i>
-          <strong>${escapeHtml(slot.label)}</strong>
-          <span>${escapeHtml(slot.value)} / ${escapeHtml(slot.max)}</span>
-        </span>
-      `).join("")}
-    </div>
-  `;
-}
-
 function spellLevelLabel(level) {
   const n = Number(level ?? 0);
   if (String(game.system?.id ?? "").toLowerCase() === "pf2e") return Number.isFinite(n) && n > 0 ? `Spell Rank ${n}` : "Cantrips";
@@ -1899,25 +1884,6 @@ function renderSpellLevelSections(items = [], slots = [], preparation = null) {
   `;
 }
 
-function renderInventoryGroups(items = [], empty = "No inventory items found.") {
-  if (!items.length) return `<div class="pp-empty">${escapeHtml(empty)}</div>`;
-  const groups = new Map();
-  for (const item of items) {
-    const key = item.containerName || (item.type === "backpack" ? item.name : "Carried");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  }
-  return Array.from(groups.entries()).map(([name, list]) => `
-    <div class="pp-subsection">
-      <div class="pp-section-header pp-big-header pp-combined-header">
-        <h2><i class="fas fa-sack-xmark"></i><span>Inventory</span><b>-</b><i class="fas ${escapeHtml(name === "Carried" ? "fa-hand" : "fa-box-open")}"></i><span>${escapeHtml(name)}</span></h2>
-        <span class="pp-header-count">${escapeHtml(list.length)}</span>
-      </div>
-      <div class="pp-card-list">${list.map(renderItemCard).join("")}</div>
-    </div>
-  `).join("");
-}
-
 function featureGroupName(item) {
   const type = String(item?.type ?? "").toLowerCase();
   const group = String(item?.group ?? "").toLowerCase();
@@ -1956,39 +1922,6 @@ function renderFeatureGroups(items = [], empty = "No features found.") {
       </div>
     `;
   }).join("");
-}
-
-
-function renderCurrency(actor) {
-  const entries = actorCurrencyEntries(actor);
-  if (!entries.length) return "";
-  return `
-    <div class="pp-currency">
-      <div class="pp-subtitle">Currency</div>
-      <div class="pp-currency-grid">
-        ${entries.map(([key, label, value]) => `
-          <article class="pp-currency-card pp-currency-${escapeHtml(key)}">
-            <div class="pp-currency-icon"><i class="fas ${escapeHtml(currencyIcon(key))}"></i></div>
-            <div>
-              <span>${escapeHtml(label)}</span>
-              <strong>${escapeHtml(value)}</strong>
-            </div>
-            <button class="pp-action-btn" type="button" data-action="currencyDialog" data-denom="${escapeHtml(key)}">Adjust</button>
-          </article>
-        `).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function currencyIcon(key) {
-  return ({
-    pp: "fa-gem",
-    gp: "fa-coins",
-    ep: "fa-circle",
-    sp: "fa-coins",
-    cp: "fa-circle-dot"
-  })[String(key ?? "").toLowerCase()] ?? "fa-coins";
 }
 
 function renderItemCard(item, { showSpellLevel = true, usesInControls = false } = {}) {
@@ -2733,23 +2666,23 @@ function openUseDialog(itemId, flowOptions = {}) {
   const ammo = model.ammoChoices?.(actor, item) ?? [];
   const concentration = model.concentrationWarning?.(actor, item) ?? "";
   const normalized = model.normalizeItem(item);
-  const activities = model.usableItemActivities(item);
-  const playerChoice = model.itemPlayerChoice(item, actor);
+  const activities = model.usableItemActivities ? model.usableItemActivities(item) : [];
+  const playerChoice = model.itemPlayerChoice?.(item, actor);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
   const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : "") : "");
   const baseCastLevel = item.type === "spell"
     ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
     : "";
-  const instructions = model.collectRollInstructions(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
-  const baseInstructionsFor = (activityId = "") => model.collectRollInstructions(item, actor, {
+  const instructions = model.collectRollInstructions?.(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
+  const baseInstructionsFor = (activityId = "") => model.collectRollInstructions?.(item, actor, {
     castLevel: baseCastLevel,
     activityId
   });
   const hasFollowupRolls = (entries = []) => entries.some((entry) => entry.formula || entry.nativeAction);
   const sneakAttack = model.id === "dnd5e" && item.type === "weapon" ? getSneakAttackOption(actor) : null;
   const targetInfoFor = (activityId = "") => model.itemTargetInfo(item, activityId);
-  const rangeFeetFor = (activityId = "") => model.getItemRangeFeet(item, activityId);
+  const rangeFeetFor = (activityId = "") => model.getItemRangeFeet?.(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
   const spellStep = item.type === "spell" && (model.id !== "pf2e" || slots.length > 0);
@@ -2782,7 +2715,7 @@ function openUseDialog(itemId, flowOptions = {}) {
     const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
     refreshSneakAttackChoice(modal, activityId);
     const options = readUseOptions(modal);
-    const currentInstructions = model.collectRollInstructions(item, actor, options);
+    const currentInstructions = model.collectRollInstructions?.(item, actor, options);
     const wrap = modal.querySelector("[data-roll-instructions]");
     if (wrap) wrap.innerHTML = renderRollInstructions(currentInstructions, true);
     const castButton = modal.querySelector("[data-modal-action='castSpell']");
@@ -2906,7 +2839,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         modal.querySelector("[data-use-step='cast']")?.classList?.remove?.("hidden");
         modal.querySelector("[data-modal-action='castSpell']")?.classList?.remove?.("hidden");
       } else {
-        await finishUseFlow(modal, options, model.collectRollInstructions(item, actor, options));
+        await finishUseFlow(modal, options, model.collectRollInstructions?.(item, actor, options));
       }
     },
     modalToggleTarget: async (_modal, button) => {
@@ -2972,7 +2905,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         return;
       }
       const { options } = refreshRollInstructions(modal);
-      const currentInstructions = model.collectRollInstructions(item, actor, options);
+      const currentInstructions = model.collectRollInstructions?.(item, actor, options);
       await finishUseFlow(modal, options, currentInstructions);
     },
     manualInstruction: async (_modal, button) => {
@@ -4637,7 +4570,7 @@ function actionNoticeType(item) {
 
 function actionNoticeActivation(item, activityId = "") {
   const selected = activityId ? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity : null;
-  const activity = game.playerPilot.model.activitySystem(selected);
+  const activity = game.playerPilot.model.activitySystem?.(selected);
   return fieldText(
     formatActionTime(activity?.activation ?? selected?.activation ?? {}),
     formatActionTime(item?.system?.activation ?? {}),
