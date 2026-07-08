@@ -55,7 +55,7 @@ export class BaseModel {
       key: "inventory",
       label: "Inventory",
       icon: "fa-sack-xmark",
-      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/item-view.hbs",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/inventory-view.hbs",
     },
     {
       key: "map",
