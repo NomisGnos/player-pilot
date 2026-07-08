@@ -1,5 +1,5 @@
 import { BaseModel } from "./base-model.js";
-import { closeModal, openModal, renderDieGlyph, renderInterfaceIcon } from "./player-pilot.js";
+import { closeModal, executePlayerFirst, openModal, renderDieGlyph, renderInterfaceIcon } from "./player-pilot.js";
 import {
   capitalizeWords,
   localize,
@@ -37,6 +37,7 @@ export class SwadeModel extends BaseModel {
   ]);
 
   static SHELL_ACTIONS = {
+    ...BaseModel.SHELL_ACTIONS,
     toggleStatusEffect: function (event, button) {
       this.currentActor.toggleActiveEffect(button.dataset.id);
     },
@@ -80,16 +81,6 @@ export class SwadeModel extends BaseModel {
         actor.rollAttribute(button.dataset.traitId);
       }
     },
-    toggleEquipped: async function (event, button) {
-      const itemId = button.dataset.itemId;
-      const actor = this.currentActor;
-      const item = actor?.items.get(itemId);
-      if (!actor || !item) return;
-
-      const equippable = game.playerPilot.model.itemIsEquippable(item);
-      if (!equippable) return;
-      game.playerPilot.model.openEquipStatusDialog(actor, item);
-    }
   };
 
   static SWADE_EQUIP_STATE = {};
@@ -114,14 +105,14 @@ export class SwadeModel extends BaseModel {
     );
 
     SwadeModel.SWADE_EQUIP_STATE_LABELS = {
-			[-2]: "Magic Bag",
-			[-1]: "Backpack",
-			[SwadeModel.SWADE_EQUIP_STATE.STORED]: game.i18n.localize("SWADE.ItemEquipStatus.Stored"),
-			[SwadeModel.SWADE_EQUIP_STATE.CARRIED]: game.i18n.localize("SWADE.ItemEquipStatus.Carried"),
-			[SwadeModel.SWADE_EQUIP_STATE.OFF_HAND]: game.i18n.localize("SWADE.ItemEquipStatus.OffHand"),
-			[SwadeModel.SWADE_EQUIP_STATE.EQUIPPED]: game.i18n.localize("SWADE.ItemEquipStatus.Equipped"),
-			[SwadeModel.SWADE_EQUIP_STATE.MAIN_HAND]: game.i18n.localize("SWADE.ItemEquipStatus.MainHand"),
-			[SwadeModel.SWADE_EQUIP_STATE.TWO_HANDS]: game.i18n.localize("SWADE.ItemEquipStatus.TwoHands")
+      [-2]: "Magic Bag",
+      [-1]: "Backpack",
+      [SwadeModel.SWADE_EQUIP_STATE.STORED]: game.i18n.localize("SWADE.ItemEquipStatus.Stored"),
+      [SwadeModel.SWADE_EQUIP_STATE.CARRIED]: game.i18n.localize("SWADE.ItemEquipStatus.Carried"),
+      [SwadeModel.SWADE_EQUIP_STATE.OFF_HAND]: game.i18n.localize("SWADE.ItemEquipStatus.OffHand"),
+      [SwadeModel.SWADE_EQUIP_STATE.EQUIPPED]: game.i18n.localize("SWADE.ItemEquipStatus.Equipped"),
+      [SwadeModel.SWADE_EQUIP_STATE.MAIN_HAND]: game.i18n.localize("SWADE.ItemEquipStatus.MainHand"),
+      [SwadeModel.SWADE_EQUIP_STATE.TWO_HANDS]: game.i18n.localize("SWADE.ItemEquipStatus.TwoHands")
     };
   }
 
@@ -241,6 +232,7 @@ export class SwadeModel extends BaseModel {
   refreshGroupsImpl(items) {
     super.refreshGroupsImpl(items);
     this.refreshPowersGroup();
+    this.refreshCurrencyGroup();
     this.groups.skills = items.filter(i => i.type === "skill").sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -284,6 +276,30 @@ export class SwadeModel extends BaseModel {
       value: pp.value,
       max: pp.max
     })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  refreshCurrencyGroup() {
+    this.groups.currency = [];
+    if (!this.actor) return;
+    const currency = this.actor.system.details.currency;
+    if (game.sfc?.coinDataMap !== undefined) {
+      //Support for SWADE Fantasy Currencies
+      const coinDataMap = Object.entries(game.sfc.coinDataMap);
+      coinDataMap.sort((a, b) => b[1].value - a[1].value);
+      this.groups.currency = coinDataMap.map(([key, coinData]) => ({
+          key,
+          label: coinData.name,
+          icon: renderInterfaceIcon(coinData.img),
+          value: this.actor.flags?.sfc?.[coinData.countFlagName] ?? 0
+        }));
+    } else {
+      this.groups.currency = [{
+        key: "currency",
+        label: game.settings.get("swade", "currencyName"),
+        icon: renderInterfaceIcon("fa-dollar-sign"),
+        value: currency
+      }];
+    }
   }
 
   refreshInventoryGroups(items) {
@@ -557,5 +573,40 @@ export class SwadeModel extends BaseModel {
         item.setEquipState(button.dataset.equipStatus);
       }
     });
+  }
+
+  async toggleEquipped(itemId) {
+    const actor = this.actor;
+    const item = actor?.items.get(itemId);
+    if (!actor || !item) return;
+
+    const equippable = this.itemIsEquippable(item);
+    if (!equippable) return;
+    this.openEquipStatusDialog(actor, item);
+  }
+
+  async updateCurrency(key, delta) {
+    const actor = this.actor;
+    if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
+
+    if (game.sfc?.coinDataMap !== undefined) {
+      const coinData = game.sfc.coinDataMap[key];
+      const current = actor.flags?.sfc?.[coinData.countFlagName] ?? 0;
+      const newValue = Math.max(0, current + delta);
+      if (current !== newValue) {
+        await actor.setFlag("sfc", coinData.countFlagName, newValue);
+      }
+    } else {
+      const currency = this.groups.currency.find(c => c.key === key);
+      const current = currency.value;
+      const newValue = Math.max(0, current + delta);
+      const label = currency.label;
+      await executePlayerFirst(
+        `${label} ${newValue}`,
+        async () => actor.update({ [`system.details.currency`]: newValue }),
+        "updateActorData",
+        { actorId: actor.id, updates: { [`system.details.currency`]: newValue }, label: `${label} ${newValue}` }
+      );
+    }
   }
 }

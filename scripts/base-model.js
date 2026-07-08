@@ -58,6 +58,15 @@ export class BaseModel {
     },
   ];
 
+  static SHELL_ACTIONS = {
+    currencyDialog: function (_event, button) {
+      game.playerPilot.model.openCurrencyDialog(button.dataset.denom);
+    },
+    toggleEquipped: function (_event, button) {
+      game.playerPilot.model.toggleEquipped(button.dataset.itemId);
+    },
+  }
+
   setActor(actor) {
     if (this.actor === actor) return;
     this.actor = actor;
@@ -378,7 +387,7 @@ export class BaseModel {
       </div>
     `, {
       applyCurrency: async (modal) => {
-        const amount = Math.floor(Number(modal.querySelector("[name='currencyAmount']")?.value ?? NaN));
+        const amount = Number(modal.querySelector("[name='currencyAmount']")?.value ?? NaN);
         if (!Number.isFinite(amount) || amount <= 0) {
           ui.notifications?.warn?.("Enter an amount greater than 0.");
           return;

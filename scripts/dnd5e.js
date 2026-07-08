@@ -83,6 +83,7 @@ export class DnD5eModel extends BaseModel {
   ]);
 
   static SHELL_ACTIONS = {
+    ...BaseModel.SHELL_ACTIONS,
     exhaustion: async function (_event, button) {
       await game.playerPilot.model.updateExhaustion(Number(button.dataset.delta ?? 0));
     },
@@ -94,27 +95,6 @@ export class DnD5eModel extends BaseModel {
     },
     togglePrepared: async function (_event, button) {
       await game.playerPilot.model.togglePrepared(button.dataset.itemId);
-    },
-    currencyDialog: function (_event, button) {
-      game.playerPilot.model.openCurrencyDialog(button.dataset.denom);
-    },
-    toggleEquipped: async function (_event, button) {
-      const itemId = button.dataset.itemId;
-      const actor = this.currentActor;
-      const item = actor?.items.get(itemId);
-      if (!actor || !item) return;
-
-      const equippable = game.playerPilot.model.itemIsEquippable(item);
-      if (!equippable) return;
-
-      const next = !game.playerPilot.model.itemIsEquipped(item);
-      await executePlayerFirst(
-        next ? "Equipped item" : "Unequipped item",
-        async () => item.update({ "system.equipped": next }),
-        "updateItemData",
-        { actorId: actor.id, itemId, updates: { "system.equipped": next }, label: next ? "Equipped item" : "Unequipped item" }
-      );
-      queueRender();
     },
   };
 
@@ -827,6 +807,23 @@ export class DnD5eModel extends BaseModel {
     return false;
   }
 
+  async toggleEquipped(itemId) {
+    const actor = this.actor;
+    const item = actor?.items.get(itemId);
+    if (!actor || !item) return;
+
+    const equippable = this.itemIsEquippable(item);
+    if (!equippable) return;
+
+    const next = !this.itemIsEquipped(item);
+    await executePlayerFirst(
+      next ? "Equipped item" : "Unequipped item",
+      async () => item.update({ "system.equipped": next }),
+      "updateItemData",
+      { actorId: actor.id, itemId, updates: { "system.equipped": next }, label: next ? "Equipped item" : "Unequipped item" }
+    );
+    queueRender();
+  }
 
   async togglePrepared(itemId) {
     const actor = this.actor;
@@ -1598,6 +1595,7 @@ export class DnD5eModel extends BaseModel {
   }
 
   async updateCurrency(key, delta) {
+    delta = Math.floor(delta);
     const actor = this.actor;
     if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
     const currency = this.groups.currency.find(c => c.key === key);

@@ -69,6 +69,7 @@ export class PF2eModel extends BaseModel {
   ]);
 
   static SHELL_ACTIONS = {
+    ...BaseModel.SHELL_ACTIONS,
     pf2eRest: function () {
       game.playerPilot.model.requestRest();
     },
@@ -77,12 +78,6 @@ export class PF2eModel extends BaseModel {
     },
     pf2eStrike: function (_event, button) {
       game.playerPilot.model.runPf2eStrike(button.dataset);
-    },
-    toggleEquipped: function (_event, button) {
-      game.playerPilot.model.toggleEquipped(button.dataset.itemId);
-    },
-    currencyDialog: function (_event, button) {
-      game.playerPilot.model.openCurrencyDialog(button.dataset.denom);
     },
   };
 
@@ -1044,6 +1039,7 @@ export class PF2eModel extends BaseModel {
   };
 
   async updateCurrency(key, delta) {
+    delta = Math.floor(delta);
     const actor = this.actor;
     if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
     const currency = this.groups.currency.find(c => c.key === key);

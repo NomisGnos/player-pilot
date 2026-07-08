@@ -5703,6 +5703,7 @@ function registerHooks() {
       requestSceneState(true);
       revealPilotShell();
       suppressPlayerAudio();
+      invalidateModelCache();
     }
     else removeBootScreen();
   });
@@ -5742,6 +5743,12 @@ function registerHooks() {
   });
   Hooks.on("deleteItem", (item) => {
     if (userIsPilot() && String(item?.parent?.id ?? item?.actor?.id ?? "") === String(state.actorId ?? "")) {
+      invalidateModelCache();
+      queueRender();
+    }
+  });
+  Hooks.on("sfcReady", () => {
+    if (userIsPilot()) {
       invalidateModelCache();
       queueRender();
     }
