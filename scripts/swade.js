@@ -376,6 +376,7 @@ export class SwadeModel extends BaseModel {
 
   itemIsEquippable(item) {
     if (!item) return false;
+    if (!this.isInventoryItem(item)) return false;
     return !!item.system.equippable;
   }
 
@@ -618,5 +619,13 @@ export class SwadeModel extends BaseModel {
         { actorId: actor.id, updates: { [`system.details.currency`]: newValue }, label: `${label} ${newValue}` }
       );
     }
+  }
+
+  equipButton(item) {
+    if (!item.equippable) return "";
+    const equipLabel = SwadeModel.SWADE_EQUIP_STATE_LABELS[item.equipStatus];
+    const equipIcon = SwadeModel.SWADE_EQUIP_STATE_ICONS[item.equipStatus];
+    return `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${item.id}"
+    title="Change how ${item.name} is carried"><i class="${equipIcon}"></i><span>${equipLabel}</span></button>`;
   }
 }

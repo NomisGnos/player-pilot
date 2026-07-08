@@ -1643,39 +1643,6 @@ function renderRollsView(model) {
   `;
 }
 
-function renderItemView(key, items, empty) {
-  const filtered = filterItemsForView(key, items);
-  const actor = currentActor();
-  const model = game.playerPilot.model;
-  const title = ({ inventory: "Inventory", spells: "Spells", features: "Features" })[key] ?? key;
-  const extra = key === "spells" ? renderSpellSlots(model?.groups?.spellSlots ?? []) : "";
-  const currency = key === "inventory" ? renderCurrency(actor) : "";
-  const content = key === "inventory"
-    ? renderInventoryGroups(filtered, empty)
-    : `<div class="pp-card-list">${filtered.map(renderItemCard).join("") || `<div class="pp-empty">${escapeHtml(empty)}</div>`}</div>`;
-  return `
-    <section class="pp-view active">
-      ${renderSearchInput(`Search ${key}...`)}
-      ${key === "inventory" ? `
-        <div class="pp-filter-funnel-row">
-          <span><i class="fas fa-sack-xmark"></i> Inventory</span>
-          ${renderFilterMenuButton("inventory", ["inventory"], "Inventory filters")}
-          <div class="pp-action-filter-popover ${state.filterMenuOpen === "inventory" ? "open" : ""}">
-            <strong>Inventory Filters</strong>
-            ${renderQuickFilters("inventory")}
-          </div>
-        </div>
-      ` : renderQuickFilters(key)}
-      <div class="pp-section">
-        ${key === "inventory" ? "" : renderSectionHeader(title, "fa-star", filtered.length)}
-        ${extra}
-        ${currency}
-        ${content}
-      </div>
-    </section>
-  `;
-}
-
 function renderFeaturesView(model) {
   const filtered = filterItemsForView("features", model.groups.features ?? []);
   return `
@@ -2049,11 +2016,7 @@ function renderItemCard(item, { showSpellLevel = true, usesInControls = false } 
   const prepButton = item.canPrepare
     ? `<button class="pp-state-switch pp-prep-switch ${item.prepared ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.prepared ? "true" : "false"}" data-action="togglePrepared" data-item-id="${escapeHtml(item.id)}" title="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}" aria-label="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`
     : "";
-  const equipButton = item.equippable
-    ? (item.pf2e
-      ? `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="Change how ${escapeHtml(item.name)} is carried"><i class="fas fa-hand"></i><span>${escapeHtml(item.pf2e.carry?.label ?? "Carry")}</span></button>`
-      : `<button class="pp-state-switch pp-equip-switch ${item.equipped ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.equipped ? "true" : "false"}" data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}" aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`)
-    : "";
+  const equipButton = game.playerPilot.model.equipButton(item);
   const useButton = canUse
     ? `<button class="pp-action-btn primary pp-use-compact" type="button" data-action="use-item" data-item-id="${escapeHtml(item.id)}">Use</button>`
     : "";

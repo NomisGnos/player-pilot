@@ -401,4 +401,12 @@ export class BaseModel {
 
   async updateCurrency(_key, _delta) {
   }
+
+  equipButton(item) {
+    if (!item.equippable) return "";
+    return `<button class="pp-state-switch pp-equip-switch ${item.equipped ? "is-on" : "is-off"}"
+    type="button" role="switch" aria-checked="${item.equipped ? "true" : "false"}"
+    data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"
+    aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`;
+  }
 }

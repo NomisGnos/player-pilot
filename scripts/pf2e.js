@@ -1601,4 +1601,10 @@ export class PF2eModel extends BaseModel {
     if (duration) rows.push(["Duration", duration]);
     return rows;
   }
+
+  equipButton(item) {
+    if (!item.equippable) return "";
+    return `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}"
+    title="Change how ${escapeHtml(item.name)} is carried"><i class="fas fa-hand"></i><span>${escapeHtml(item.pf2e.carry?.label ?? "Carry")}</span></button>`;
+  }
 }
