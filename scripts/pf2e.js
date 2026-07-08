@@ -128,13 +128,12 @@ export class PF2eModel extends BaseModel {
     this.refreshStatCards();
   }
 
-  refreshAbilityScores(actor) {
-    const source = actor?.system?.abilities ?? actor?.abilities ?? {};
-    return Object.entries(source).slice(0, 6).map(([key, data]) => ({
+  refreshAbilityScores() {
+    const source = this.actor?.system?.abilities ?? this.actor?.abilities ?? {};
+    this.summary.abilities =  Object.entries(source).slice(0, 6).map(([key, data]) => ({
       key,
       label: localizedFieldLabel(data?.label ?? globalThis.CONFIG?.PF2E?.abilities?.[key], key),
-      score: numberText(data?.value ?? data?.score),
-      mod: signedMod(data?.mod ?? data?.modifier ?? 0),
+      mod: signedMod(data?.mod),
       icon: this.abilityDisplayIcon(key),
     }));
   }

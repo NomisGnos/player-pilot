@@ -164,8 +164,8 @@ export class DnD5eModel extends BaseModel {
     return bySize;
   }
 
-  refreshAbilityScores(actor) {
-    const abilities = actor?.system?.abilities ?? {};
+  refreshAbilityScores() {
+    const abilities = this.actor?.system.abilities ?? {};
     this.summary.abilities = DND5E_ABILITIES.map(([key, label]) => ({
       key,
       label,
