@@ -3,7 +3,7 @@
         {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search skills..."}}
 
         <div class="pp-section">
-            {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.adapter.label}}
+            {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.label}}
 
             <div class="pp-card-list">
                 {{#each model.groups.skills as |skill|}}

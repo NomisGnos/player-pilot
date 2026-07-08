@@ -1,5 +1,5 @@
 import { renderInterfaceIcon, setting, state } from "./player-pilot.js";
-import { htmlToPlain, itemDisplayName } from "./utils.js";
+import { escapeHtml, htmlToPlain, itemDisplayName } from "./utils.js";
 
 
 export class BaseModel {
@@ -9,6 +9,10 @@ export class BaseModel {
 
   get id() {
     return this.constructor.id;
+  }
+
+  get label() {
+    return this.constructor.label;
   }
 
   summary = {};
@@ -116,9 +120,8 @@ export class BaseModel {
   }
 
   refreshInventoryGroups(items) {
-    const filteredItems = this.filterItemsForView("inventory", items);
     const groups = new Map();
-    for (const item of filteredItems) {
+    for (const item of items) {
       const key = item.containerName || (item.type === "backpack" ? item.name : "Carried");
       if (!groups.has(key)) {
         groups.set(key, {
@@ -178,7 +181,7 @@ export class BaseModel {
     return false;
   }
 
-  itemTargetInfo(item) {
+  itemTargetInfo(item, activityId = "") {
     return {
       count: 0,
       needsTarget: false,
@@ -201,6 +204,14 @@ export class BaseModel {
 
   itemBelongsInActions(item) {
     return false;
+  }
+
+  quickFiltersForKey(view) {
+    const quickFilters = {
+      actions: [["all", "All", "fa-layer-group"]],
+      inventory: [["all", "All", "fa-layer-group"]]
+    };
+    return quickFilters[view] ?? [];
   }
 
   filterAvailableTabs() {
@@ -259,5 +270,42 @@ export class BaseModel {
   }
 
   async useItem(actor, item, options = {}) {
+  }
+
+  abilityDisplayIcon(key) {
+    return ({
+      str: "fa-dumbbell",
+      strength: "fa-dumbbell",
+      dex: "fa-person-running",
+      dexterity: "fa-person-running",
+      con: "fa-heart-pulse",
+      constitution: "fa-heart-pulse",
+      int: "fa-brain",
+      intelligence: "fa-brain",
+      wis: "fa-eye",
+      wisdom: "fa-eye",
+      cha: "fa-masks-theater",
+      charisma: "fa-masks-theater",
+      perception: "fa-binoculars"
+    })[String(key ?? "").toLowerCase()] ?? "fa-circle";
+  }
+
+  spellSlotChoices(item) {
+    return [];
+  }
+
+  concentrationWarning(item) {
+    return "";
+  }
+
+  ammoChoices(item) {
+    return [];
+  }
+
+  async rollCheck(kind, key) {
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor: this.actor }),
+      content: `<p><strong>${escapeHtml(this.actor.name)}</strong> requested ${escapeHtml(kind)} ${escapeHtml(key)}.</p>`
+    });
   }
 }

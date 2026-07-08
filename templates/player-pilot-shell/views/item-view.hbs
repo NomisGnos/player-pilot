@@ -1,5 +1,17 @@
 <main class="pp-body">
     <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'inventory')}}active{{/if}}" data-tab="inventory">
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search inventory..."}}
+
+        <div class="pp-filter-funnel-row">
+            <span><i class="fas fa-sack-xmark"></i> Inventory</span>
+
+            {{{renderFilterMenuButton "inventory" "inventory" "Inventory filters"}}}
+            <div class="pp-action-filter-popover {{#if (eq state.filterMenuOpen 'inventory')}}open{{/if}}">
+                <strong>Inventory Filters</strong>
+                {{{renderQuickFilters "inventory"}}}
+            </div>
+        </div>
+
         {{#each model.groups.inventory}}
             <div class="pp-subsection">
                 <div class="pp-section-header pp-big-header pp-combined-header">
@@ -7,7 +19,7 @@
                     <span class="pp-header-count">{{this.count}}</span>
                 </div>
                 <div class="pp-card-list">
-                    {{#each this.items as |item|}}
+                    {{#each (filterItemsForView "inventory" this.items) as |item|}}
                         {{{renderItemCard item}}}
                     {{/each}}
                 </div>

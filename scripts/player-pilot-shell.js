@@ -1,5 +1,3 @@
-import { DND5E_ACTIONS } from "./dnd5e.js";
-import { PF2E_ACTIONS } from "./pf2e.js";
 import {
   SUPPORT_URL,
   applySearchFilter,
@@ -65,6 +63,9 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
           await rollCheck("initiative", "initiative");
         }
       },
+      rollCheck: async function (event, button) {
+        await rollCheck(button.dataset.kind ?? "", button.dataset.key ?? "");
+      }
     },
   };
 

@@ -383,7 +383,7 @@ export class SwadeModel extends BaseModel {
     return (item.system.shots ?? 0) > 0 || !!item.system.ammo;
   }
 
-  itemTargetInfo(item) {
+  itemTargetInfo(item, activityId = "") {
     const targetInfo = {
       count: 0,
       needsTarget: false,
@@ -440,7 +440,7 @@ export class SwadeModel extends BaseModel {
     return false;
   }
 
-  quickFiltersForView(view) {
+  quickFiltersForKey(view) {
     if (view === "actions") {
       return [
         ["all", "All", "fa-layer-group"],
@@ -449,7 +449,7 @@ export class SwadeModel extends BaseModel {
         ["consumable", "Consumables", "fa-flask"],
       ];
     }
-    return super.quickFiltersForView(view);
+    return super.quickFiltersForKey(view);
   }
 
   isTabAvailable(tab) {
@@ -549,12 +549,3 @@ export class SwadeModel extends BaseModel {
     });
   }
 }
-
-export const SWADE_QUICK_FILTERS = {
-  actions: [
-    ["all", "All", "fa-layer-group"],
-    ["weapon", "Weapons", "fa-sword"],
-    ["power", "Powers", "fa-wand-magic-sparkles"],
-    ["consumable", "Consumables", "fa-flask"],
-  ],
-};

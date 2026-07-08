@@ -1,24 +1,16 @@
 import { BaseModel } from "./base-model.js";
-import { DND5E_ABILITIES, DND5E_ADAPTER, actorConcentrationEffects, applyPendingCastLevel, concentrationEffectLabel, dndSpellScalingIncrease } from "./dnd5e.js";
 import {
   CURRENCY_LABELS,
-  GENERIC_ADAPTER,
   abilityDisplayIcon,
   activitySystem,
   getItemActivities,
-  getItemRangeFeet,
-  itemCanBeUsed,
   itemDisplayName,
   itemIsEquippable,
   itemIsEquipped,
   itemPlayerChoice,
-  itemRequiresConcentration,
   itemTargetInfo,
-  normalizeGenericItem,
-  normalizeItem,
   selectedItemActivity,
   spellDetailRows,
-  spellPreparedValue,
   usableItemActivities
 } from "./generic.js";
 import {
@@ -33,7 +25,8 @@ import {
   pf2eTraits
 } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
-import { SWADE_QUICK_FILTERS, SwadeModel } from "./swade.js";
+import { SwadeModel } from "./swade.js";
+import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
 import {
   asArray,
   capitalizeWords,
@@ -143,10 +136,6 @@ function removeClientStorageValue(storage, key) {
   } catch (_err) {
     // best effort
   }
-}
-
-function currentSystemId() {
-  return String(globalThis.game?.system?.id ?? "").toLowerCase();
 }
 
 export function renderDieGlyph(sides, extraClass = "") {
@@ -405,21 +394,6 @@ function startBootScreen() {
     }, 150);
   }
   return screen;
-}
-
-function updateBootProgress(progress, label = "") {
-  const requested = clamp(Number(progress) || 0, 0, 100);
-  const now = bootClock();
-  bootState.progress = Math.max(estimatedBootProgress(now), requested);
-  bootState.driftStart = bootState.progress;
-  bootState.driftTarget = bootState.progress;
-  bootState.driftStartedAt = now;
-  bootState.driftDurationMs = 0;
-  bootState.driftVersion += 1;
-  if (label) bootState.label = label;
-  const screen = ensureBootScreen();
-  if (!screen) return;
-  paintBootProgress(screen, bootState.progress, bootState.label);
 }
 
 function setBootStage(progress, label, fakeCeiling) {
@@ -836,13 +810,6 @@ function activeTokenForActor(actorId = state.actorId) {
   return actorToken;
 }
 
-export function systemAdapter() {
-  const id = String(game.system?.id ?? "").toLowerCase();
-  if (id === "dnd5e") return DND5E_ADAPTER;
-  if (id === "pf2e") return PF2E_ADAPTER;
-  return GENERIC_ADAPTER;
-}
-
 function actorConditionKeys(actor) {
   const values = [
     ...asArray(actor?.statuses),
@@ -958,49 +925,13 @@ function renderSpellDetails(item) {
   `;
 }
 
-function preparedUpdateData(item, prepared) {
-  if (Object.prototype.hasOwnProperty.call(item?.system ?? {}, "prepared")) return { "system.prepared": prepared ? 1 : 0 };
-  return { "system.prepared": prepared };
-}
-
-function normalizeItemForAdapter(item, adapter = systemAdapter(item?.actor)) {
-  if (adapter?.id === "pf2e") return normalizePf2eItem(item);
-  if (adapter?.id === "dnd5e") return normalizeItem(item);
-  if (adapter?.id === "swade") return game.playerPilot.model.normalizeItem(item);
-  return normalizeGenericItem(item);
-}
-
-function buildModel(actor) {
-  const adapter = systemAdapter(actor);
-  return {
-    adapter,
-    summary: adapter.summary(actor),
-    groups: adapter.groups(actor)
-  };
-}
-
-function actorModelSignature(actor) {
-  const actorStamp = actor?._stats?.modifiedTime ?? actor?._source?._stats?.modifiedTime ?? actor?._source?._stats?.lastModifiedTime ?? "";
-  const itemStamps = asArray(actor?.items)
-    .map((item) => `${item.id}:${item?._stats?.modifiedTime ?? item?._source?._stats?.modifiedTime ?? item?._source?._stats?.lastModifiedTime ?? ""}`)
-    .join("|");
-
-  const effectFingerprint = actor?.statuses ? `${Array.from(actor.statuses).join(",")}:${(actor.effects).map((e) => `${e.id ?? ""}:${e.img ?? ""}`)}` : "";
-  return `${actor?.id ?? ""}:${actorStamp}:${itemStamps}:${effectFingerprint}`;
-}
-
 export function cachedModel(actor) {
-  const signature = actorModelSignature(actor);
-  if (state.modelCache?.signature === signature && state.modelCache?.actorId === String(actor?.id ?? "")) {
-    return state.modelCache.model;
-  }
-  const model = buildModel(actor);
-  state.modelCache = { actorId: String(actor?.id ?? ""), signature, model };
-  return model;
+  game.playerPilot.model.refreshCache(actor);
+  return game.playerPilot.model;
 }
 
 export function invalidateModelCache() {
-  state.modelCache = null;
+  game.playerPilot.model.invalidateModelCache();
 }
 
 class PlayerPilotAccessPanel extends FormApplication {
@@ -1219,6 +1150,8 @@ async function registerHandlebarsHelpers() {
     renderSmartBadge,
     renderBadge,
     filterItemsForView,
+    renderFilterMenuButton,
+    renderQuickFilters,
   });
 
   Handlebars.registerHelper("renderItemCard", function (item, options) {
@@ -1568,57 +1501,6 @@ async function renderShell() {
   await state.shell.render(true);
 }
 
-function renderStatCard(key, icon, label, value, controls = "") {
-  return `
-    <div class="pp-stat ${escapeHtml(key)}">
-      <div class="pp-stat-icon">${renderInterfaceIcon(icon)}</div>
-      <div class="pp-stat-copy">
-        <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(value ?? "-")}</strong>
-      </div>
-      ${controls}
-    </div>
-  `;
-}
-
-function renderHpBar(summary) {
-  const current = Number(summary.hpValue ?? NaN);
-  const max = Number(summary.hpMax ?? NaN);
-  const temp = Math.max(0, Number(summary.hpTemp ?? 0) || 0);
-  const pct = Number.isFinite(current) && Number.isFinite(max) && max > 0 ? clamp((current / max) * 100, 0, 100) : 0;
-  const label = Number.isFinite(current) && Number.isFinite(max) ? `${current} / ${max}` : (summary.hp ?? "-");
-  return `
-    <div class="pp-hp-panel pp-compact-card">
-      <div class="pp-hp-copy">
-        <span><i class="fas fa-heart-pulse"></i> HP</span>
-        <strong>${escapeHtml(label)}</strong>
-        ${temp > 0 ? `<em>Temporary ${escapeHtml(temp)}</em>` : ""}
-      </div>
-      <div class="pp-hp-track" aria-label="Hit points">
-        <div class="pp-hp-fill" style="width:${pct}%"></div>
-        ${temp > 0 ? `<div class="pp-hp-temp" style="width:${clamp((temp / Math.max(max || temp, 1)) * 100, 5, 100)}%"></div>` : ""}
-      </div>
-      ${summary.hitDice ? `<div class="pp-hit-dice"><i class="fas fa-dice"></i><span>Hit Dice</span><strong>${escapeHtml(summary.hitDice)}</strong></div>` : ""}
-    </div>
-  `;
-}
-
-function renderAbilityScores(summary = {}) {
-  const abilities = Array.isArray(summary.abilities) ? summary.abilities : [];
-  if (!abilities.length) return "";
-  return `
-    <div class="pp-ability-grid">
-      ${abilities.map((ability) => `
-        <div class="pp-ability-score">
-          <span class="pp-ability-label"><i class="fas ${escapeHtml(ability.icon)}"></i><span>${escapeHtml(ability.label)}</span></span>
-          <strong>${escapeHtml(ability.score ?? "-")}</strong>
-          <em><small>Modifier</small>${escapeHtml(ability.mod ?? "+0")}</em>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
 function renderSearchInput(placeholder) {
   return `
     <div class="pp-search-wrap">
@@ -1715,23 +1597,6 @@ const PF2E_QUICK_FILTERS = {
   ]
 };
 
-const GENERIC_QUICK_FILTERS = {
-  actions: QUICK_FILTERS.actions,
-  actionTiming: [["all", "All Actions", "fa-layer-group"]],
-  actionSpellTraits: [["all", "All Spells", "fa-wand-magic-sparkles"]],
-  spells: [["all", "All"]],
-  features: QUICK_FILTERS.features,
-  inventory: QUICK_FILTERS.inventory
-};
-
-function quickFilterOptions(key) {
-  const systemId = currentSystemId();
-  if (systemId === "pf2e" && PF2E_QUICK_FILTERS[key]) return PF2E_QUICK_FILTERS[key];
-  if (systemId === "swade" && SWADE_QUICK_FILTERS[key]) return SWADE_QUICK_FILTERS[key];
-  if (systemId !== "dnd5e" && GENERIC_QUICK_FILTERS[key]) return GENERIC_QUICK_FILTERS[key];
-  return QUICK_FILTERS[key] ?? [];
-}
-
 export function quickFilterFor(key) {
   const value = state.quickFilters?.[key];
   return Array.isArray(value) ? (value[0] ?? "all") : (value ?? "all");
@@ -1748,7 +1613,7 @@ export function isMultiFilterKey(key) {
 }
 
 function renderQuickFilters(key) {
-  const filters = quickFilterOptions(key);
+  const filters = game.playerPilot.model.quickFiltersForKey(key);
   if (!filters.length) return "";
   const active = quickFilterFor(key);
   const selected = new Set(selectedQuickFilters(key));
@@ -1832,6 +1697,7 @@ function filterSelectionCount(keys = []) {
 }
 
 function renderFilterMenuButton(menu, keys, label = "Filters") {
+  keys = Array.isArray(keys) ? keys : [keys];
   const count = filterSelectionCount(keys);
   const open = state.filterMenuOpen === menu;
   return `
@@ -1883,7 +1749,7 @@ function renderRollsView(model) {
     <section class="pp-view active">
       ${renderSearchInput("Search rolls...")}
       <div class="pp-section">
-        ${renderSectionHeader("Rolls", "pp-die-d20", model.adapter.label)}
+        ${renderSectionHeader("Rolls", "pp-die-d20", model.label)}
         ${renderCheckGroups(model.groups.checks ?? [])}
       </div>
     </section>
@@ -1893,10 +1759,10 @@ function renderRollsView(model) {
 function renderItemView(key, items, empty) {
   const filtered = filterItemsForView(key, items);
   const actor = currentActor();
-  const model = actor ? buildModel(actor) : null;
+  const model = game.playerPilot.model;
   const title = ({ inventory: "Inventory", spells: "Spells", features: "Features" })[key] ?? key;
   const extra = key === "spells" ? renderSpellSlots(model?.groups?.spellSlots ?? []) : "";
-  const currency = key === "inventory" ? renderCurrency(actor, model?.adapter) : "";
+  const currency = key === "inventory" ? renderCurrency(actor) : "";
   const content = key === "inventory"
     ? renderInventoryGroups(filtered, empty)
     : `<div class="pp-card-list">${filtered.map(renderItemCard).join("") || `<div class="pp-empty">${escapeHtml(empty)}</div>`}</div>`;
@@ -1945,7 +1811,7 @@ function renderFeaturesView(model) {
 
 function renderSpellsView(model) {
   const filtered = filterItemsForView("spells", model.groups.spells ?? []);
-  const preparation = spellPreparationSummary(currentActor(), model.groups.spells ?? []);
+  const preparation = model.spellPreparationSummary(model.groups.spells ?? []);
   return `
     <section class="pp-view active">
       ${renderSearchInput("Search spells...")}
@@ -1956,20 +1822,6 @@ function renderSpellsView(model) {
       </div>
     </section>
   `;
-}
-
-function spellPreparationSummary(actor, normalizedSpells = []) {
-  if (!actor || String(game.system?.id ?? "").toLowerCase() !== "dnd5e") return null;
-  const classes = asArray(actor.items).filter((item) => item.type === "class");
-  const preparationClasses = classes.filter((item) => Number(item.system?.spellcasting?.preparation?.max ?? 0) > 0);
-  const max = preparationClasses.reduce((total, item) => total + Number(item.system?.spellcasting?.preparation?.max ?? 0), 0);
-  const classValue = preparationClasses.reduce((total, item) => total + Number(item.system?.spellcasting?.preparation?.value ?? 0), 0);
-  const fallbackValue = normalizedSpells.filter((spell) => spell.canPrepare && spell.prepared).length;
-  const value = Number.isFinite(classValue) && classValue > 0 ? classValue : fallbackValue;
-  return {
-    value,
-    max: Number.isFinite(max) && max > 0 ? max : null
-  };
 }
 
 function renderActionGroup(title, items = [], adapterId = "") {
@@ -2269,8 +2121,8 @@ function actorCurrencyEntries(actor, adapter = null) {
   return ordered.filter((entry) => Number.isFinite(entry[2]));
 }
 
-function renderCurrency(actor, adapter = null) {
-  const entries = actorCurrencyEntries(actor, adapter);
+function renderCurrency(actor) {
+  const entries = actorCurrencyEntries(actor);
   if (!entries.length) return "";
   return `
     <div class="pp-currency">
@@ -2324,7 +2176,7 @@ function renderItemCard(item, { showSpellLevel = true, usesInControls = false } 
     ? `<div class="pp-uses-control"><i class="fas fa-battery-three-quarters"></i><span>${escapeHtml(item.usesText.replace(/^Uses Available\s*/i, "").split(",")[0].replace(/\s*\/\s*/g, "/"))}</span></div>`
     : "";
   const prepButton = item.canPrepare
-    ? `<button class="pp-state-switch pp-prep-switch ${item.prepared ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.prepared ? "true" : "false"}" data-action="toggle-prep" data-item-id="${escapeHtml(item.id)}" title="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}" aria-label="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`
+    ? `<button class="pp-state-switch pp-prep-switch ${item.prepared ? "is-on" : "is-off"}" type="button" role="switch" aria-checked="${item.prepared ? "true" : "false"}" data-action="togglePrepared" data-item-id="${escapeHtml(item.id)}" title="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}" aria-label="${item.prepared ? "Unprepare" : "Prepare"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`
     : "";
   const equipButton = item.equippable
     ? (item.pf2e
@@ -2492,41 +2344,11 @@ function rollCardIcon(check = {}) {
   return "pp-die-d20";
 }
 
-function compactD20Formula(formula) {
-  const mod = parseD20Mod(formula);
-  if (mod === 0) return "d20";
-  return mod > 0 ? `d20 + ${mod}` : `d20 - ${Math.abs(mod)}`;
-}
-
 function describeFormula(formula) {
   const text = String(formula ?? "d20").replace(/\s+/g, " ").trim();
   const mod = parseD20Mod(text);
   if (/\bd20\b/i.test(text)) return `Roll a d20, then add ${signedMod(mod)}`;
   return `Roll ${text}`;
-}
-
-function renderTargetsView() {
-  const scene = state.scene ?? buildLocalSceneState();
-  const selected = selectedTargetSet(scene?.id ?? "");
-  const tokens = displayedTargetTokens(scene);
-  const source = scene?.combatTokenIds?.length ? "Combat + Allowed Targets" : ((scene?.manualTargetIds?.length || scene?.manualTargetActorIds?.length) ? "Players + GM Added" : "Player Tokens");
-  return `
-    <section class="pp-view active">
-      <div class="pp-section">
-        ${renderSectionHeader(scene?.name ?? "Targets", "fa-crosshairs", source)}
-        <div class="pp-section-header pp-sub-actions">
-          <button class="pp-button" type="button" data-action="refresh-scene">Refresh</button>
-        </div>
-        <div class="pp-two-col">
-          <button class="pp-button primary" type="button" data-action="apply-targets">Apply Targets</button>
-          <button class="pp-button" type="button" data-action="ping-targets">Ping Selected</button>
-        </div>
-        <div class="pp-target-list">
-          ${tokens.map((token) => renderTokenRow(token, selected)).join("") || `<div class="pp-empty">No visible scene tokens received yet.</div>`}
-        </div>
-      </div>
-    </section>
-  `;
 }
 
 function displayedTargetTokens(scene = state.scene) {
@@ -2557,24 +2379,7 @@ function renderTargetStateBadges(token = {}) {
   `;
 }
 
-function renderTokenRow(token, selected) {
-  const isSelected = selected.has(token.id);
-  return `
-    <article class="pp-token-row ${isSelected ? "selected" : ""}" data-token-id="${escapeHtml(token.id)}">
-      <div class="pp-card-img" style="background-image:url('${escapeHtml(token.img)}')"></div>
-      <div class="pp-card-main">
-        <div class="pp-card-title"><span>${escapeHtml(token.name)}</span></div>
-        <div class="pp-card-meta">
-          ${token.actorId === state.actorId ? `<span class="pp-badge good">Your character</span>` : ""}
-          ${renderTargetStateBadges(token)}
-        </div>
-      </div>
-      <button class="pp-action-btn pp-target-toggle ${isSelected ? "primary" : ""}" type="button" data-action="target-toggle" data-token-id="${escapeHtml(token.id)}">${isSelected ? "Targeted" : "Target"}</button>
-    </article>
-  `;
-}
-
-function renderMapView(actor) {
+function renderMapView() {
   return `
     <section class="pp-view active">
       <div class="pp-dpad-wrap">
@@ -2933,10 +2738,6 @@ async function handleDocumentClick(event) {
     await openItemInfoDialog(actionEl.dataset.itemId ?? "");
     return;
   }
-  if (action === "toggle-prep") {
-    await togglePrepared(actionEl.dataset.itemId ?? "");
-    return;
-  }
   if (action === "toggle-equipped") {
     await toggleEquipped(actionEl.dataset.itemId ?? "");
     return;
@@ -3071,9 +2872,7 @@ export function closeModal() {
 async function openItemInfoDialog(itemId) {
   const item = findItem(itemId);
   if (!item) return;
-  const actor = currentActor();
-  const adapter = actor ? systemAdapter(actor) : GENERIC_ADAPTER;
-  const normalized = normalizeItemForAdapter(item, adapter);
+  const normalized = game.playerPilot.model.normalizeItem(item);
   const canUse = normalized.usable !== false;
   const description = await enrichRulesHtml(item.system?.description?.value ?? item.system?.description ?? "", item);
   openModal(`
@@ -3095,30 +2894,6 @@ async function openItemInfoDialog(itemId) {
   });
 }
 
-function openConcentrationBreakDialog(itemId, actor, item, effect) {
-  const currentName = concentrationEffectLabel(actor, effect);
-  openModal(`
-    <h2>Break Concentration First</h2>
-    <div class="pp-concentration-gate">
-      <i class="fas fa-brain"></i>
-      <div>
-        <span>Currently concentrating on</span>
-        <strong>${escapeHtml(currentName)}</strong>
-      </div>
-    </div>
-    <p><strong>${escapeHtml(itemDisplayName(item))}</strong> also requires concentration. End ${escapeHtml(currentName)} before continuing with this use?</p>
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-      <button class="pp-button primary" type="button" data-modal-action="replaceConcentration">Break &amp; Continue</button>
-    </div>
-  `, {
-    replaceConcentration: async () => {
-      closeModal();
-      openUseDialog(itemId, { approvedConcentrationId: String(effect.id ?? "") });
-    }
-  });
-}
-
 function openUseDialog(itemId, flowOptions = {}) {
   if (pilotPaused()) {
     warnPaused();
@@ -3127,46 +2902,46 @@ function openUseDialog(itemId, flowOptions = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
-  const adapter = systemAdapter(actor);
-  const canUseItem = adapter.canUseItem?.(actor, item) ?? itemCanBeUsed(item);
+  const model = game.playerPilot.model;
+  const canUseItem = model.canUseItem(actor, item) ?? model.itemCanBeUsed(item);
   if (!canUseItem) {
-    const message = adapter.id === "pf2e" && item.type === "spell"
+    const message = model.id === "pf2e" && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
       : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
     ui.notifications?.warn?.(message);
     return;
   }
-  const activeConcentration = adapter.id === "dnd5e" && item.type === "spell" && itemRequiresConcentration(item)
-    ? actorConcentrationEffects(actor)[0] ?? null
+  const activeConcentration = model.id === "dnd5e" && item.type === "spell" && model.itemRequiresConcentration(item)
+    ? model.actorConcentrationEffects(actor)[0] ?? null
     : null;
   if (activeConcentration && String(activeConcentration.id ?? "") !== String(flowOptions.approvedConcentrationId ?? "")) {
-    openConcentrationBreakDialog(itemId, actor, item, activeConcentration);
+    model.openConcentrationBreakDialog(itemId, actor, item, activeConcentration);
     return;
   }
-  const slots = adapter.spellSlotChoices?.(actor, item) ?? [];
-  const ammo = adapter.ammoChoices?.(actor, item) ?? [];
-  const concentration = adapter.concentrationWarning?.(actor, item) ?? "";
-  const normalized = normalizeItemForAdapter(item, adapter);
+  const slots = model.spellSlotChoices(item);
+  const ammo = model.ammoChoices?.(actor, item) ?? [];
+  const concentration = model.concentrationWarning?.(actor, item) ?? "";
+  const normalized = model.normalizeItem(item);
   const activities = usableItemActivities(item);
   const playerChoice = itemPlayerChoice(item, actor);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
-  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (adapter.id === "pf2e" ? pf2eSpellRank(item) : "") : "");
+  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? pf2eSpellRank(item) : "") : "");
   const baseCastLevel = item.type === "spell"
-    ? (adapter.id === "pf2e" ? pf2eSpellRank(item) : Number(item.system?.level ?? 0))
+    ? (model.id === "pf2e" ? pf2eSpellRank(item) : Number(item.system?.level ?? 0))
     : "";
-  const instructions = collectRollInstructions(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
-  const baseInstructionsFor = (activityId = "") => collectRollInstructions(item, actor, {
+  const instructions = model.collectRollInstructions(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
+  const baseInstructionsFor = (activityId = "") => model.collectRollInstructions(item, actor, {
     castLevel: baseCastLevel,
     activityId
   });
   const hasFollowupRolls = (entries = []) => entries.some((entry) => entry.formula || entry.nativeAction);
-  const sneakAttack = adapter.id === "dnd5e" && item.type === "weapon" ? getSneakAttackOption(actor) : null;
-  const targetInfoFor = (activityId = "") => adapter.targetInfo?.(item, activityId) ?? itemTargetInfo(item, activityId);
-  const rangeFeetFor = (activityId = "") => adapter.rangeFeet?.(item, activityId) ?? getItemRangeFeet(item, activityId);
+  const sneakAttack = model.id === "dnd5e" && item.type === "weapon" ? getSneakAttackOption(actor) : null;
+  const targetInfoFor = (activityId = "") => model.itemTargetInfo(item, activityId);
+  const rangeFeetFor = (activityId = "") => model.getItemRangeFeet(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
-  const spellStep = item.type === "spell" && (adapter.id !== "pf2e" || slots.length > 0);
+  const spellStep = item.type === "spell" && (model.id !== "pf2e" || slots.length > 0);
   clearUseTargets();
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
     if (!sneakAttack) return null;
@@ -3196,7 +2971,7 @@ function openUseDialog(itemId, flowOptions = {}) {
     const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
     refreshSneakAttackChoice(modal, activityId);
     const options = readUseOptions(modal);
-    const currentInstructions = collectRollInstructions(item, actor, options);
+    const currentInstructions = model.collectRollInstructions(item, actor, options);
     const wrap = modal.querySelector("[data-roll-instructions]");
     if (wrap) wrap.innerHTML = renderRollInstructions(currentInstructions, true);
     const castButton = modal.querySelector("[data-modal-action='castSpell']");
@@ -3207,7 +2982,7 @@ function openUseDialog(itemId, flowOptions = {}) {
     if (preview) preview.innerHTML = renderCastPreview(
       currentInstructions,
       options.castLevel,
-      adapter.id,
+      model.id,
       baseInstructionsFor(options.activityId),
       baseCastLevel
     );
@@ -3264,12 +3039,12 @@ function openUseDialog(itemId, flowOptions = {}) {
     <div class="pp-use-step ${!activityStep && !targetStep && spellStep ? "" : "hidden"}" data-use-step="cast">
       ${concentration ? `<p><strong>${escapeHtml(concentration)}</strong></p>` : ""}
       ${slots.length ? `
-        <label>${adapter.id === "pf2e" ? "Cast Rank" : "Cast Level"}</label>
+        <label>${model.id === "pf2e" ? "Cast Rank" : "Cast Level"}</label>
         <select class="pp-select" name="castLevel">
           ${slots.map((slot) => `<option value="${slot.level}">${escapeHtml(slot.label)}</option>`).join("")}
         </select>
-      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${adapter.id === "pf2e" && pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${adapter.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
-      <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, adapter.id, baseInstructionsFor(defaultActivityId), baseCastLevel)}</div>
+      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${model.id === "pf2e" && pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${model.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
+      <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, model.id, baseInstructionsFor(defaultActivityId), baseCastLevel)}</div>
       ${ammo.length ? `
         <label>Ammo</label>
         <select class="pp-select" name="ammoItemId">
@@ -3320,7 +3095,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         modal.querySelector("[data-use-step='cast']")?.classList?.remove?.("hidden");
         modal.querySelector("[data-modal-action='castSpell']")?.classList?.remove?.("hidden");
       } else {
-        await finishUseFlow(modal, options, collectRollInstructions(item, actor, options));
+        await finishUseFlow(modal, options, model.collectRollInstructions(item, actor, options));
       }
     },
     modalToggleTarget: async (_modal, button) => {
@@ -3386,7 +3161,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         return;
       }
       const { options } = refreshRollInstructions(modal);
-      const currentInstructions = collectRollInstructions(item, actor, options);
+      const currentInstructions = model.collectRollInstructions(item, actor, options);
       await finishUseFlow(modal, options, currentInstructions);
     },
     manualInstruction: async (_modal, button) => {
@@ -3426,7 +3201,7 @@ function getSneakAttackOption(actor) {
   const rogueScale = actor?.system?.scale?.rogue ?? {};
   const scale = rogueScale["sneak-attack"] ?? rogueScale.sneakAttack ?? rogueScale.sneak ?? null;
   let formula = scaleValueFormula(scale);
-  const damage = collectRollInstructions(feature, actor).find((entry) => entry.kind === "damage" && entry.formula);
+  const damage = game.playerPilot.model.collectRollInstructions(feature, actor).find((entry) => entry.kind === "damage" && entry.formula);
   if (!formula) formula = String(damage?.formula ?? "").trim();
   if (!formula) {
     const description = htmlToPlain(feature.system?.description?.value ?? feature.system?.description ?? "");
@@ -3717,10 +3492,6 @@ function tokenDistanceFeet(a, b) {
   return (Math.hypot(ax - bx, ay - by) / gridSize) * gridDistance;
 }
 
-function collectRollHints(item, actor, options = {}) {
-  return collectRollInstructions(item, actor, options).map((entry) => `${entry.label}: ${entry.formula || entry.detail}`.trim()).slice(0, 8);
-}
-
 function resolvePf2eFormula(formula, actor, item, castRank) {
   const raw = String(formula ?? "").trim();
   if (!raw || !raw.includes("@")) return raw;
@@ -3822,195 +3593,7 @@ function collectPf2eRollInstructions(item, actor, options = {}) {
   return entries.slice(0, 10);
 }
 
-function collectRollInstructions(item, actor, options = {}) {
-  const systemId = currentSystemId();
-  if (systemId === "pf2e") return collectPf2eRollInstructions(item, actor, options);
-  const isDnd5e = systemId === "dnd5e";
-  const entries = [];
-  const system = item?.system ?? {};
-  const labels = item?.labels ?? {};
-  const itemActivities = getItemActivities(item);
-  const chosenActivity = options.activityId ? selectedItemActivity(item, options.activityId)?.activity : null;
-  const chosenAttackMode = isDnd5e && chosenActivity ? attackRollMode(actor, chosenActivity) : {};
-  const activityHasEffectRolls = (activity) => {
-    const data = activitySystem(activity);
-    const damage = data?.damage ?? {};
-    const healing = data?.healing ?? {};
-    return !!fieldText(damage.formula, healing.formula)
-      || (Array.isArray(damage.parts) ? damage.parts : Object.values(damage.parts ?? {})).length > 0
-      || (Array.isArray(healing.parts) ? healing.parts : Object.values(healing.parts ?? {})).length > 0;
-  };
-  const preferActivityEffects = isDnd5e && item?.type === "spell" && itemActivities.some(activityHasEffectRolls);
-  const push = (entry) => {
-    const effectKind = rollEffectKind(entry.kind, entry.label, entry.effectType, entry.activity);
-    const next = {
-      kind: effectKind,
-      label: cleanRulesText(entry.label ?? "Roll"),
-      formula: cleanRulesText(resolveDisplayFormula(entry.formula ?? "", actor, item, entry.activity)),
-      detail: cleanRulesText(entry.detail ?? ""),
-      scaled: entry.scaled === true,
-      rollMode: String(entry.rollMode ?? ""),
-      rollModeReason: cleanRulesText(entry.rollModeReason ?? "")
-    };
-    if (next.kind === "attack" && next.formula) next.formula = applyAttackRollModeFormula(next.formula, next.rollMode);
-    if (!next.label || (!next.formula && !next.detail)) return;
-    if (next.kind === "damage") {
-      const sameFormula = entries.find((existing) => existing.kind === "damage" && existing.formula && next.formula && existing.formula === next.formula);
-      if (sameFormula) {
-        if (/^damage roll$/i.test(sameFormula.label) && !/^damage roll$/i.test(next.label)) sameFormula.label = next.label;
-        return;
-      }
-    }
-    const key = `${next.label}|${next.formula}|${next.detail}`;
-    if (!entries.some((existing) => `${existing.label}|${existing.formula}|${existing.detail}` === key)) entries.push(next);
-  };
-  if (labels.toHit) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${labels.toHit}`, activity: chosenActivity, ...chosenAttackMode });
-  if (!preferActivityEffects && labels.damage) push({
-    kind: "damage",
-    label: "Damage Roll",
-    formula: fieldText(labels.damage?.formula, labels.damage),
-    effectType: damageTypeLabel(labels.damage),
-    activity: chosenActivity
-  });
-  if (!preferActivityEffects && labels.healing) push({ kind: "healing", label: "Healing Roll", formula: fieldText(labels.healing?.formula, labels.healing), activity: chosenActivity });
-  if (!preferActivityEffects && Array.isArray(labels.damages)) {
-    labels.damages.forEach((damage) => {
-      const type = damageTypeLabel(damage);
-      push({
-        kind: "damage",
-        label: `${type || "Damage"} Roll`,
-        formula: damage?.formula ?? "",
-        effectType: type,
-        activity: chosenActivity
-      });
-    });
-  }
-  const systemDamage = system.damage ?? {};
-  const systemDamageParts = Array.isArray(systemDamage.parts) ? systemDamage.parts : Object.values(systemDamage.parts ?? {});
-  if (!preferActivityEffects) systemDamageParts.forEach((part) => {
-    const formula = Array.isArray(part) ? part[0] : fieldText(part?.formula);
-    const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
-    push({ kind: "damage", label: `${capitalizeWords(type) || "Damage"} Roll`, formula, effectType: type, activity: chosenActivity });
-  });
-  if (system.attackBonus) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${signedMod(system.attackBonus)}`, activity: chosenActivity, ...chosenAttackMode });
-  const saveDc = readSaveDc(system.save?.dc ?? system.activities?.save?.dc ?? actor?.system?.attributes?.spelldc);
-  const saveAbility = fieldText(system.save?.ability, system.save?.dc?.ability, system.save?.dc?.label);
-  if (saveDc) push({ kind: "save", label: savingThrowLabel(saveAbility), detail: `The target must roll against Difficulty Class ${saveDc}.` });
-  const selectedActivityId = String(options.activityId ?? "");
-  const selectedActivity = selectedActivityId ? selectedItemActivity(item, selectedActivityId)?.activity : null;
-  const selectedHasEffectRolls = selectedActivity ? activityHasEffectRolls(selectedActivity) : false;
-  const instructionActivities = selectedActivity && (!preferActivityEffects || selectedHasEffectRolls) ? [selectedActivity] : itemActivities;
-  for (const activity of instructionActivities) {
-    const activityData = activitySystem(activity);
-    const attack = activityData?.attack ?? {};
-    const attackMode = isDnd5e ? attackRollMode(actor, activity) : {};
-    if (attack?.bonus || attack?.toHit) push({
-      kind: "attack",
-      label: "Attack Roll",
-      formula: `d20 ${signedMod(attack.bonus ?? attack.toHit)}`,
-      activity,
-      ...attackMode
-    });
-    const damage = activityData?.damage ?? {};
-    const parts = Array.isArray(damage.parts) ? damage.parts : Object.values(damage.parts ?? {});
-    parts.forEach((part) => {
-      const rawFormula = Array.isArray(part)
-        ? part[0]
-        : fieldText(
-          part?.formula,
-          Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
-        );
-      const scaledFormula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel, actor) : rawFormula;
-      const type = Array.isArray(part) ? part[1] : damageTypeLabel(part);
-      push({
-        kind: "damage",
-        label: `${capitalizeWords(type) || "Damage"} Roll`,
-        formula: scaledFormula,
-        detail: scaledFormula !== rawFormula ? `Cast at Spell Level ${options.castLevel}` : "",
-        scaled: scaledFormula !== rawFormula,
-        effectType: type,
-        activity
-      });
-    });
-    const healing = activityData?.healing ?? {};
-    const healingParts = Array.isArray(healing.parts) ? healing.parts : [];
-    const rawHealingFormula = fieldText(
-      healing.formula,
-      Number(healing.number) > 0 && Number(healing.denomination) > 0
-        ? `${healing.number}d${healing.denomination}${healing.bonus ? ` + ${healing.bonus}` : ""}`
-        : ""
-    );
-    const scaledHealingFormula = isDnd5e
-      ? scaleSpellPartFormula(rawHealingFormula, healing.scaling, item, options.castLevel, actor)
-      : rawHealingFormula;
-    if (scaledHealingFormula) push({
-      kind: "healing",
-      label: "Healing Roll",
-      formula: scaledHealingFormula,
-      detail: scaledHealingFormula !== rawHealingFormula ? `Cast at Spell Level ${options.castLevel}` : "",
-      scaled: scaledHealingFormula !== rawHealingFormula,
-      activity
-    });
-    healingParts.forEach((part) => {
-      const rawFormula = Array.isArray(part)
-        ? part[0]
-        : fieldText(
-          part?.formula,
-          Number(part?.number) > 0 && Number(part?.denomination) > 0 ? `${part.number}d${part.denomination}${part.bonus ? ` + ${part.bonus}` : ""}` : ""
-        );
-      const formula = isDnd5e ? scaleSpellPartFormula(rawFormula, part?.scaling, item, options.castLevel, actor) : rawFormula;
-      push({
-        kind: "healing",
-        label: "Healing Roll",
-        formula,
-        detail: formula !== rawFormula ? `Cast at Spell Level ${options.castLevel}` : "",
-        scaled: formula !== rawFormula,
-        activity
-      });
-    });
-    const save = activityData?.save ?? {};
-    const activityDc = readSaveDc(save?.dc?.value ?? save?.dc);
-    if (activityDc) push({
-      kind: "save",
-      label: savingThrowLabel(fieldText(save.ability, save.dc?.ability)),
-      detail: `The target must roll against Difficulty Class ${activityDc}.`
-    });
-  }
-  if (options.sneakAttackFormula) {
-    push({
-      kind: "damage",
-      label: "Sneak Attack Damage",
-      formula: String(options.sneakAttackFormula),
-      detail: "Apply this extra damage if the Sneak Attack requirements are met."
-    });
-  }
-  if (isDnd5e) applyCastLevelScaling(entries, item, options.castLevel);
-  if (itemRequiresConcentration(item)) push({ kind: "note", label: "Concentration", detail: "This can require concentration after casting." });
-  return pruneRollInstructions(entries).slice(0, 10);
-}
-
-function resolveDisplayFormula(formula, actor, item, activity = null) {
-  const raw = String(formula ?? "").trim();
-  if (!raw || !raw.includes("@")) return raw;
-  const data = {
-    ...(actor?.getRollData?.() ?? {}),
-    item: item?.getRollData?.() ?? item?.system ?? {},
-    ...(activity?.getRollData?.() ?? activitySystem(activity)?.rollData ?? {})
-  };
-  try {
-    const replaced = Roll.replaceFormulaData?.(raw, data, { missing: 0, warn: false });
-    if (replaced && !replaced.includes("@")) return replaced;
-  } catch (_err) {
-    // Use the path replacement fallback below.
-  }
-  return raw.replace(/@([\w.-]+)/g, (match, path) => {
-    const value = foundry.utils.getProperty(data, path);
-    if (typeof value === "number" || (typeof value === "string" && value.trim() !== "")) return String(value);
-    return match;
-  });
-}
-
-function attackRollMode(actor, activity) {
+export function attackRollMode(actor, activity) {
   const data = activitySystem(activity);
   const mode = Number(data?.attack?.roll?.mode ?? data?.roll?.mode ?? 0);
   const all = new Set(actorConditionKeys(actor));
@@ -4070,183 +3653,6 @@ function attackRollMode(actor, activity) {
   };
 }
 
-function applyAttackRollModeFormula(formula, rollMode = "") {
-  const text = String(formula ?? "");
-  if (rollMode === "advantage") return text.replace(/\b(?:1)?d20\b/i, "2d20kh");
-  if (rollMode === "disadvantage") return text.replace(/\b(?:1)?d20\b/i, "2d20kl");
-  return text;
-}
-
-function damageTypeLabel(source = {}) {
-  const direct = fieldText(source?.damageType, source?.type, source?.flavor);
-  if (direct && direct !== "[object Object]") return capitalizeWords(direct);
-  const types = source?.types ?? source?.damageTypes;
-  if (types?.values && typeof types.values === "function") {
-    return Array.from(types.values()).map(capitalizeWords).filter(Boolean).join(" + ");
-  }
-  if (Array.isArray(types)) return types.map(capitalizeWords).filter(Boolean).join(" + ");
-  if (types && typeof types === "object") {
-    return Object.entries(types)
-      .filter(([, enabled]) => enabled === true)
-      .map(([type]) => capitalizeWords(type))
-      .join(" + ");
-  }
-  return "";
-}
-
-function savingThrowLabel(ability) {
-  const raw = String(fieldText(ability, "Saving Throw")).toLowerCase();
-  const text = DND5E_ABILITIES.find(([key]) => key === raw)?.[1] ?? capitalizeWords(raw);
-  return /saving throw/i.test(text) ? text : `${text} Saving Throw`;
-}
-
-function pruneRollInstructions(entries = []) {
-  const output = [];
-  for (const entry of entries) {
-    if (["damage", "healing"].includes(entry.kind) && entry.formula) {
-      const dice = formulaDiceSides(entry.formula);
-      const duplicateIndex = output.findIndex((existing) => {
-        if (existing.kind !== entry.kind || !existing.formula) return false;
-        const existingDice = formulaDiceSides(existing.formula);
-        if (!dice.sides || dice.sides !== existingDice.sides) return false;
-        const genericPair = isGenericRollInstruction(existing) || isGenericRollInstruction(entry);
-        const sameLabel = normalizedRollInstructionLabel(existing.label) === normalizedRollInstructionLabel(entry.label);
-        const sameFormula = normalizedFormula(existing.formula) === normalizedFormula(entry.formula);
-        const augmentedFormula = formulaExtends(existing.formula, entry.formula) || formulaExtends(entry.formula, existing.formula);
-        const scaledPair = sameLabel && (existing.scaled === true || entry.scaled === true);
-        return sameFormula || (genericPair && dice.sides === existingDice.sides) || (sameLabel && (augmentedFormula || scaledPair));
-      });
-      if (duplicateIndex >= 0) {
-        const existing = output[duplicateIndex];
-        const preferredFormula = rollInstructionScore(entry) > rollInstructionScore(existing) ? entry : existing;
-        const preferredLabel = isGenericRollInstruction(existing) && !isGenericRollInstruction(entry)
-          ? entry.label
-          : (!isGenericRollInstruction(existing) ? existing.label : entry.label);
-        output[duplicateIndex] = {
-          ...preferredFormula,
-          label: preferredLabel,
-          detail: entry.scaled ? entry.detail : (existing.scaled ? existing.detail : preferredFormula.detail),
-          scaled: existing.scaled === true || entry.scaled === true
-        };
-        continue;
-      }
-    }
-    output.push(entry);
-  }
-  return output;
-}
-
-function normalizedFormula(formula) {
-  return String(formula ?? "").toLowerCase().replace(/\s+/g, "");
-}
-
-function normalizedRollInstructionLabel(label) {
-  return String(label ?? "")
-    .toLowerCase()
-    .replace(/\b(damage|healing|roll)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isGenericRollInstruction(entry = {}) {
-  return !normalizedRollInstructionLabel(entry.label);
-}
-
-function formulaExtends(longer, shorter) {
-  const a = normalizedFormula(longer);
-  const b = normalizedFormula(shorter);
-  return a !== b && a.length > b.length && a.includes(b);
-}
-
-function rollInstructionScore(entry = {}) {
-  const formula = normalizedFormula(entry.formula);
-  const dice = formulaDiceSides(formula);
-  const hasExtraTerms = /[+\-*/@]/.test(formula.replace(/^[-+]?\d*d\d+/i, ""));
-  return (entry.scaled === true ? 1000 : 0)
-    + (hasExtraTerms ? 200 : 0)
-    + (!isGenericRollInstruction(entry) ? 100 : 0)
-    + (dice.count * 10)
-    + formula.length;
-}
-
-function formulaDiceSides(formula) {
-  const text = String(formula ?? "");
-  const match = text.match(/(\d*)d(\d+)/i);
-  return {
-    count: Number(match?.[1] || 1),
-    sides: Number(match?.[2] || 0)
-  };
-}
-
-function applyCastLevelScaling(entries, item, castLevel) {
-  if (item?.type !== "spell") return;
-  const baseLevel = Number(item.system?.level ?? item.system?.rank ?? 0);
-  const level = Number(castLevel ?? 0);
-  if (!Number.isFinite(baseLevel) || !Number.isFinite(level) || level <= baseLevel) return;
-  const scaling = spellScalingFormula(item);
-  if (!scaling) return;
-  const extraLevels = level - baseLevel;
-  const extra = extraLevels === 1 ? scaling : `${extraLevels} * (${scaling})`;
-  for (const entry of entries) {
-    if (!["damage", "healing"].includes(entry.kind) || !entry.formula || entry.scaled) continue;
-    if (entry.formula.includes(scaling) && entry.formula.includes("*")) continue;
-    entry.formula = `${entry.formula} + ${extra}`;
-    entry.detail = `Cast at Spell Level ${level}`;
-  }
-}
-
-function scaleSpellPartFormula(formula, scaling, item, castLevel, actor = null) {
-  const base = String(formula ?? "").trim();
-  const effectiveScaling = scaling ?? item?.system?.scaling ?? {};
-  const rawMode = String(effectiveScaling?.mode ?? "").toLowerCase();
-  const scalingMode = rawMode === "cantrip" ? "whole" : rawMode;
-  if (!base || item?.type !== "spell" || !["whole", "half"].includes(scalingMode)) return base;
-  const increase = dndSpellScalingIncrease(actor, item, castLevel);
-  if (!Number.isFinite(increase) || increase <= 0) return base;
-  const steps = scalingMode === "half" ? Math.floor(increase * 0.5) : increase;
-  if (steps <= 0) return base;
-  const diceMatch = base.match(/^(\d+)\s*d\s*(\d+)(.*)$/i);
-  const scalingNumber = Number(effectiveScaling.number ?? 0);
-  if (diceMatch && Number.isFinite(scalingNumber) && scalingNumber > 0) {
-    return `${Number(diceMatch[1]) + (scalingNumber * steps)}d${diceMatch[2]}${diceMatch[3] ?? ""}`.trim();
-  }
-  const scalingFormula = String(effectiveScaling.formula ?? "").trim();
-  if (scalingFormula) return `${base} + ${steps === 1 ? scalingFormula : `${steps} * (${scalingFormula})`}`;
-  return base;
-}
-
-function spellScalingFormula(item) {
-  const system = item?.system ?? {};
-  const direct = fieldText(system.scaling?.formula, system.scaling?.damage, system.scaling?.healing);
-  if (direct) return direct;
-  for (const activity of getItemActivities(item)) {
-    const data = activitySystem(activity);
-    const damage = data.damage ?? {};
-    const healing = data.healing ?? {};
-    const consumption = data.consumption ?? {};
-    const formula = fieldText(
-      data.scaling?.formula,
-      damage.scaling?.formula,
-      healing.scaling?.formula,
-      consumption.scaling?.formula
-    );
-    if (formula) return formula;
-    const number = Number(data.scaling?.number ?? damage.scaling?.number ?? healing.scaling?.number ?? 0);
-    const denomination = Number(data.scaling?.denomination ?? damage.scaling?.denomination ?? healing.scaling?.denomination ?? 0);
-    if (Number.isFinite(number) && number > 0 && Number.isFinite(denomination) && denomination > 0) return `${number}d${denomination}`;
-  }
-  return "";
-}
-
-function readSaveDc(value) {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "number" || typeof value === "string") return String(value);
-  if (typeof value === "object") {
-    return fieldText(value.value, value.dc, value.formula, value.label);
-  }
-  return "";
-}
-
 function openRollChoiceDialog(data = {}) {
   const name = String(data.name ?? "Roll");
   const formula = String(data.formula ?? "d20");
@@ -4274,7 +3680,7 @@ function openRollChoiceDialog(data = {}) {
 
 export function openPf2eInitiativeDialog() {
   const actor = currentActor();
-  if (!actor || systemAdapter(actor).id !== "pf2e") return;
+  if (!actor) return;
   const selected = String(actor.system?.initiative?.statistic ?? "perception");
   const options = pf2eInitiativeOptions(actor);
   openModal(`
@@ -4349,14 +3755,6 @@ function renderDiceFormulaIcons(formula) {
   `;
 }
 
-function rollEffectKind(kind = "roll", label = "", effectType = "", activity = null) {
-  const requested = String(kind || "roll").toLowerCase();
-  if (!["damage", "healing"].includes(requested)) return requested;
-  const activityType = String(activitySystem(activity)?.type ?? activity?.type ?? "").toLowerCase();
-  const healingSignal = `${fieldText(effectType)} ${fieldText(label)} ${activityType}`.toLowerCase();
-  return /\b(?:heal|healing)\b/.test(healingSignal) ? "healing" : requested;
-}
-
 function formulaFlatModifier(formula = "") {
   let total = 0;
   for (const match of String(formula).matchAll(/([+-])\s*(\d+(?:\.\d+)?)(?!\s*[dD*\/])/g)) {
@@ -4428,7 +3826,7 @@ async function rollFormulaForActor(actor, data = {}) {
 }
 
 function openRollReminderDialog(item, actor, options = {}) {
-  const instructions = collectRollInstructions(item, actor, options);
+  const instructions = game.playerPilot.model.collectRollInstructions(item, actor, options);
   if (!instructions.length) return;
   openModal(`
     <h2>${escapeHtml(itemDisplayName(item))}</h2>
@@ -4506,7 +3904,7 @@ async function runPf2eStrike(data = {}) {
     return;
   }
   const actor = currentActor();
-  if (!actor || systemAdapter(actor).id !== "pf2e") return;
+  if (!actor) return;
   const operation = String(data.operation ?? "attack");
   if (operation === "flow") {
     const strikeModel = findPf2eStrikeModel(actor, data);
@@ -4749,7 +4147,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
     return;
   }
   const actor = currentActor();
-  if (!actor || !item || systemAdapter(actor).id !== "pf2e") return;
+  if (!actor || !item || game.playerPilot.model.id !== "pf2e") return;
   const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
   const requestedRank = Number(castRank);
   const requestedAttack = Number(attackNumber);
@@ -4784,7 +4182,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   if (!actor || !item) return;
   const canUseItem = game.playerPilot.model.canUseItem?.(actor, item) ?? game.playerPilot.model.itemCanBeUsed(item);
   if (!canUseItem) {
-    const message = adapter.id === "pf2e" && item.type === "spell"
+    const message = game.playerPilot.model.id === "pf2e" && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
       : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
     ui.notifications?.warn?.(message);
@@ -4829,7 +4227,7 @@ export async function rollCheck(kind, key) {
   const executed = await executePlayerFirst(
     `Roll ${kind}`,
     async () => {
-      rollResult = await systemAdapter(actor).rollCheck(actor, kind, key);
+      rollResult = await game.playerPilot.model.rollCheck(kind, key);
       return rollResult;
     },
     "rollCheck",
@@ -4924,18 +4322,17 @@ async function toggleEquipped(itemId) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
-  const adapter = systemAdapter(actor);
-  const equippable = adapter.id === "pf2e" ? normalizePf2eItem(item).equippable : itemIsEquippable(item);
+  const equippable = game.playerPilot.model.id === "pf2e" ? normalizePf2eItem(item).equippable : itemIsEquippable(item);
   if (!equippable) return;
-  if (adapter.id === "pf2e") {
+  if (game.playerPilot.model.id === "pf2e") {
     openPf2eCarryDialog(item);
     return;
   }
-  const next = !(adapter.id === "pf2e" ? item?.isEquipped === true : itemIsEquipped(item));
-  if (typeof adapter.toggleEquipped === "function") {
+  const next = !(game.playerPilot.model.id === "pf2e" ? item?.isEquipped === true : itemIsEquipped(item));
+  if (typeof game.playerPilot.model.toggleEquipped === "function") {
     await executePlayerFirst(
       next ? "Equipped item" : "Unequipped item",
-      async () => adapter.toggleEquipped(actor, item, next),
+      async () => game.playerPilot.model.toggleEquipped(actor, item, next),
       "pf2eToggleEquipped",
       { actorId: actor.id, itemId, equipped: next, label: next ? "Equipped item" : "Unequipped item" }
     );
@@ -4953,7 +4350,7 @@ async function toggleEquipped(itemId) {
 
 function openPf2eCarryDialog(item) {
   const actor = currentActor();
-  if (!actor || !item || systemAdapter(actor).id !== "pf2e") return;
+  if (!actor || !item) return;
   const usage = item.system?.usage ?? {};
   const current = pf2eCarryState(item);
   const hasStowingContainer = asArray(actor.itemTypes?.backpack).some((container) => container !== item && container.system?.stowing && !container.isInContainer);
@@ -4998,14 +4395,13 @@ function openPf2eCarryDialog(item) {
 async function setPf2eCarry(itemId, options = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
-  const adapter = actor ? systemAdapter(actor) : null;
-  if (!actor || !item || adapter?.id !== "pf2e" || typeof adapter.setCarry !== "function") return;
+  if (!actor || !item || game.playerPilot.model?.id !== "pf2e" || typeof game.playerPilot.model.setCarry !== "function") return;
   const label = options.carryType === "held"
     ? `Held in ${Number(options.handsHeld) === 2 ? "2 hands" : "1 hand"}`
     : capitalizeWords(options.carryType ?? "carried");
   await executePlayerFirst(
     label,
-    async () => adapter.setCarry(actor, item, options),
+    async () => game.playerPilot.model.setCarry(actor, item, options),
     "pf2eToggleEquipped",
     { actorId: actor.id, itemId, ...options, label }
   );
@@ -5017,17 +4413,17 @@ async function updateCurrency(denom, delta) {
   const actor = currentActor();
   const key = String(denom ?? "").trim();
   if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
-  const adapter = systemAdapter(actor);
-  const current = Number(actorCurrencyEntries(actor, adapter).find(([entryKey]) => entryKey === key)?.[2] ?? NaN);
+  const model = game.playerPilot.model;
+  const current = Number(actorCurrencyEntries(actor, model).find(([entryKey]) => entryKey === key)?.[2] ?? NaN);
   if (!Number.isFinite(current)) return;
   const next = Math.max(0, current + delta);
-  const label = actorCurrencyEntries(actor, adapter).find(([entryKey]) => entryKey === key)?.[1] ?? key.toUpperCase();
-  if (typeof adapter.updateCurrency === "function") {
+  const label = actorCurrencyEntries(actor, model).find(([entryKey]) => entryKey === key)?.[1] ?? key.toUpperCase();
+  if (typeof model.updateCurrency === "function") {
     const appliedDelta = next - current;
     if (!appliedDelta) return;
     await executePlayerFirst(
       `${label} ${next}`,
-      async () => adapter.updateCurrency(actor, key, appliedDelta),
+      async () => model.updateCurrency(actor, key, appliedDelta),
       "pf2eCurrency",
       { actorId: actor.id, denomination: key, delta: appliedDelta, label: `${label} ${next}` }
     );
@@ -5044,9 +4440,8 @@ async function updateCurrency(denom, delta) {
 
 function openCurrencyDialog(denom) {
   const actor = currentActor();
-  const adapter = actor ? systemAdapter(actor) : null;
   const key = String(denom ?? "").trim();
-  const entry = actorCurrencyEntries(actor, adapter).find(([entryKey]) => entryKey === key);
+  const entry = actorCurrencyEntries(actor, game.playerPilot.model).find(([entryKey]) => entryKey === key);
   if (!actor || !entry) return;
   const [_key, label, current] = entry;
   openModal(`
@@ -5077,36 +4472,9 @@ function openCurrencyDialog(denom) {
   });
 }
 
-async function togglePrepared(itemId) {
-  const actor = currentActor();
-  const item = findItem(itemId);
-  if (!actor || !item || item.type !== "spell") return;
-  if (normalizeItem(item).preparationLocked) {
-    ui.notifications?.info?.(`${itemDisplayName(item)} is always available and cannot be unprepared.`);
-    return;
-  }
-  const current = spellPreparedValue(item);
-  const nextPrepared = !current;
-  if (nextPrepared) {
-    const model = buildModel(actor);
-    const preparation = spellPreparationSummary(actor, model.groups.spells ?? []);
-    if (preparation && Number.isFinite(preparation.max) && preparation.value >= preparation.max) {
-      ui.notifications?.warn?.(`Prepared spell maximum reached: ${preparation.value} / ${preparation.max}. Unprepare a spell before preparing another.`);
-      return;
-    }
-  }
-  await executePlayerFirst(
-    nextPrepared ? "Prepare spell" : "Unprepare spell",
-    async () => item.update(preparedUpdateData(item, nextPrepared)),
-    "prepareSpell",
-    { actorId: actor.id, itemId, prepared: nextPrepared }
-  );
-  queueRender();
-}
-
 async function updatePf2eResource(resource, delta) {
   const actor = currentActor();
-  if (!actor || systemAdapter(actor).id !== "pf2e" || !Number.isFinite(delta) || delta === 0) return;
+  if (!actor || game.playerPilot.model.id !== "pf2e" || !Number.isFinite(delta) || delta === 0) return;
   const key = resource === "focus" ? "focus" : "heroPoints";
   const data = actor.system?.resources?.[key] ?? {};
   const current = Number(data.value ?? 0);
@@ -5159,10 +4527,9 @@ export async function requestRest(restType) {
     addLog("Turn locked");
     return;
   }
-  const adapter = systemAdapter(actor);
-  if (typeof adapter.rest === "function") {
+  if (typeof game.playerPilot.model.rest === "function") {
     const gmIds = activeGmIds();
-    if (adapter.id === "pf2e" && gmIds.length) {
+    if (game.playerPilot.model.id === "pf2e" && gmIds.length) {
       sendSocket("rest", {
         targetUserIds: [gmIds[0]],
         actorId: actor.id,
@@ -5172,7 +4539,7 @@ export async function requestRest(restType) {
       showResultToast("Rest request sent", "The GM has the PF2e confirmation.");
       return;
     }
-    if (adapter.id === "pf2e") {
+    if (game.playerPilot.model.id === "pf2e") {
       openModal(`
         <h2>Rest for the Night?</h2>
         <p>PF2e will recover the character according to its Rest for the Night rules.</p>
@@ -5185,7 +4552,7 @@ export async function requestRest(restType) {
           closeModal();
           await executePlayerFirst(
             "Rest for the Night",
-            async () => adapter.rest(actor, { skipDialog: true }),
+            async () => game.playerPilot.model.rest(actor, { skipDialog: true }),
             "rest",
             { actorId: actor.id, restType: "night" }
           );
@@ -5193,7 +4560,7 @@ export async function requestRest(restType) {
       });
       return;
     }
-    await executePlayerFirst("Rest", async () => adapter.rest(actor), "rest", { actorId: actor.id, restType });
+    await executePlayerFirst("Rest", async () => game.playerPilot.model.rest(actor), "rest", { actorId: actor.id, restType });
     return;
   }
   const normalized = String(restType).toLowerCase() === "long" ? "long" : "short";
@@ -5928,7 +5295,7 @@ async function handleGmSocket(data) {
     sendSceneState(data.userId, true);
     return;
   }
-  if (game.paused === true && ["targetUpdate", "moveToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "prepareSpell", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
+  if (game.paused === true && ["targetUpdate", "moveToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
     sendSocket("commandResult", { targetUserIds: [data.userId], message: "Game paused" });
     return;
   }
@@ -6010,10 +5377,6 @@ async function handleGmSocket(data) {
   }
   if (data.type === "rest") {
     await gmRun(`${data.restType} rest`, data.userId, () => gmRest(data));
-    return;
-  }
-  if (data.type === "prepareSpell") {
-    await gmRun(data.prepared ? "Prepared spell" : "Unprepared spell", data.userId, () => gmPrepareSpell(data));
     return;
   }
   if (data.type === "updateActorData") {
@@ -6136,7 +5499,7 @@ function renderGmActionNotice({ requester, actor, item, data }) {
   const activityName = String(data.options?.activityName ?? "").trim();
   const activation = actionNoticeActivation(item, data.options?.activityId);
   const isSpell = item.type === "spell";
-  const adapterId = systemAdapter(actor).id;
+  const adapterId = game.playerPilot.model.id;
   const selectedLevel = Number(data.options?.castLevel ?? 0);
   const baseLevel = adapterId === "pf2e" ? Number(pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
   const castLevel = selectedLevel > 0 ? selectedLevel : baseLevel;
@@ -6189,7 +5552,7 @@ async function gmUseItem(data) {
   const notice = renderGmActionNotice({ requester, actor, item, data });
   const toastParts = [
     `${requester}: ACTION ${item.name}`,
-    notice.levelText ? `${systemAdapter(actor).id === "pf2e" ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
+    notice.levelText ? `${game.playerPilot.model.id === "pf2e" ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
     `TARGET ${compactTargetText(notice.targets)}`
   ].filter(Boolean);
   ui.notifications?.info?.(toastParts.join("  |  "));
@@ -6211,12 +5574,12 @@ async function gmUseItem(data) {
 async function gmRollCheck(data) {
   const actor = gmActor(data.actorId);
   if (!actor) throw new Error("Actor not found.");
-  await systemAdapter(actor).rollCheck(actor, data.kind, data.key);
+  await game.playerPilot.model.rollCheck(actor, data.kind, data.key);
 }
 
 async function gmPf2eStrike(data) {
   const actor = gmActor(data.actorId);
-  if (!actor || systemAdapter(actor).id !== "pf2e") throw new Error("PF2e actor not found.");
+  if (!actor || game.playerPilot.model.id !== "pf2e") throw new Error("PF2e actor not found.");
   if (Array.isArray(data.targetIds)) {
     gmProxyTargets.set(String(data.userId), {
       actorId: data.actorId,
@@ -6231,7 +5594,7 @@ async function gmPf2eStrike(data) {
 async function gmPf2eItemRoll(data) {
   const actor = gmActor(data.actorId);
   const item = actor?.items?.get?.(data.itemId);
-  if (!actor || !item || systemAdapter(actor).id !== "pf2e") throw new Error("PF2e actor or item not found.");
+  if (!actor || !item || game.playerPilot.model.id !== "pf2e") throw new Error("PF2e actor or item not found.");
   if (Array.isArray(data.targetIds)) {
     gmProxyTargets.set(String(data.userId), {
       actorId: data.actorId,
@@ -6246,27 +5609,10 @@ async function gmPf2eItemRoll(data) {
 async function gmRest(data) {
   const actor = gmActor(data.actorId);
   if (!actor) throw new Error("Actor not found.");
-  const adapter = systemAdapter(actor);
-  if (typeof adapter.rest === "function") return adapter.rest(actor);
+  if (typeof game.playerPilot.model.rest === "function") return game.playerPilot.model.rest(actor);
   if (data.restType === "long" && typeof actor.longRest === "function") return actor.longRest({ dialog: true, chat: true });
   if (typeof actor.shortRest === "function") return actor.shortRest({ dialog: true, chat: true });
   throw new Error("Rest method not available.");
-}
-
-async function gmPrepareSpell(data) {
-  const actor = gmActor(data.actorId);
-  const item = actor?.items?.get?.(data.itemId);
-  if (!item || item.type !== "spell") throw new Error("Spell not found.");
-  if (normalizeItem(item).preparationLocked) throw new Error(`${itemDisplayName(item)} is always available and cannot be unprepared.`);
-  const prepared = data.prepared === true;
-  if (prepared && !spellPreparedValue(item)) {
-    const model = buildModel(actor);
-    const preparation = spellPreparationSummary(actor, model.groups.spells ?? []);
-    if (preparation && Number.isFinite(preparation.max) && preparation.value >= preparation.max) {
-      throw new Error(`Prepared spell maximum reached: ${preparation.value} / ${preparation.max}`);
-    }
-  }
-  await item.update(preparedUpdateData(item, prepared));
 }
 
 async function gmUpdateActorData(data) {
@@ -6278,25 +5624,23 @@ async function gmUpdateActorData(data) {
 async function gmPf2eToggleEquipped(data) {
   const actor = gmActor(data.actorId);
   const item = actor?.items?.get?.(data.itemId);
-  const adapter = actor ? systemAdapter(actor) : null;
   if (!actor || !item) throw new Error("PF2e equipment control unavailable.");
-  if (data.carryType && typeof adapter?.setCarry === "function") {
-    await adapter.setCarry(actor, item, {
+  if (data.carryType && typeof game.playerPilot.model.setCarry === "function") {
+    await game.playerPilot.model.setCarry(actor, item, {
       carryType: data.carryType,
       handsHeld: data.handsHeld,
       inSlot: data.inSlot
     });
     return;
   }
-  if (typeof adapter?.toggleEquipped !== "function") throw new Error("PF2e equipment control unavailable.");
-  await adapter.toggleEquipped(actor, item, data.equipped === true);
+  if (typeof game.playerPilot.model.toggleEquipped !== "function") throw new Error("PF2e equipment control unavailable.");
+  await game.playerPilot.model.toggleEquipped(actor, item, data.equipped === true);
 }
 
 async function gmPf2eCurrency(data) {
   const actor = gmActor(data.actorId);
-  const adapter = actor ? systemAdapter(actor) : null;
-  if (!actor || typeof adapter?.updateCurrency !== "function") throw new Error("PF2e currency control unavailable.");
-  await adapter.updateCurrency(actor, String(data.denomination ?? ""), Number(data.delta ?? 0));
+  if (!actor || typeof game.playerPilot.model.updateCurrency !== "function") throw new Error("PF2e currency control unavailable.");
+  await game.playerPilot.model.updateCurrency(actor, String(data.denomination ?? ""), Number(data.delta ?? 0));
 }
 
 async function gmUpdateItemData(data) {
@@ -7088,7 +6432,7 @@ function installPilotPromptObserver() {
 
 function createSystemModel() {
   if (game.system.id == "dnd5e") {
-    //game.playerPilot.model = new DnD5e();
+    game.playerPilot.model = new DnD5eModel();
   } else if (game.system.id == "pf2e") {
     //game.playerPilot.model = new PF2e();
   } else if (game.system.id == "swade") {
@@ -7236,7 +6580,6 @@ function registerHooks() {
   Hooks.on("renderJournalEntryPageTextSheet", handleSharedDocumentPopupRender);
   Hooks.on("renderJournalEntryPageImageSheet", handleSharedDocumentPopupRender);
   Hooks.on("renderApplicationV2", handleSharedDocumentPopupRender);
-  Hooks.on("renderDialog", applyPendingCastLevel);
   Hooks.on("renderTokenHUD", bindTokenHudTargetToggle);
 }
 

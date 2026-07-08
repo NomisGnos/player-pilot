@@ -150,7 +150,7 @@ export const GENERIC_ADAPTER = {
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/map-view.hbs",
     },
   ],
-  filterAvailableTabs(tabs, summary) { return tabs.filter(t => t.key !== "map" || (state.scene?.mapControlsEnabled ?? setting("mapControlsEnabled", true)) === true); },
+  filterAvailableTabs(tabs) { return tabs.filter(t => t.key !== "map" || (state.scene?.mapControlsEnabled ?? setting("mapControlsEnabled", true)) === true); },
 };
 
 export const CURRENCY_LABELS = [
@@ -268,12 +268,6 @@ export function spellIsReady(item) {
   if (["always", "atwill", "innate", "pact"].includes(mode)) return true;
   if (!mode && !hasPreparedFlag) return true;
   return prepared;
-}
-
-export function spellPreparedValue(item) {
-  const system = item?.system ?? {};
-  if (Object.prototype.hasOwnProperty.call(system, "prepared")) return Number(system.prepared) > 0 || system.prepared === true;
-  return legacySpellPreparation(item)?.prepared === true;
 }
 
 export function spellAlwaysPrepared(item) {
@@ -592,28 +586,6 @@ export function getItemRangeFeet(item, activityId = "") {
     return value;
   }
   return 0;
-}
-
-export function itemRequiresConcentration(item) {
-  const system = item?.system ?? {};
-  if (system.components?.concentration === true || system.components?.con === true) return true;
-  if (system.duration?.concentration === true || String(system.duration?.units ?? "").toLowerCase() === "concentration") return true;
-  if (system.properties?.concentration === true || system.properties?.con === true) return true;
-  if (hasItemProperty(item, "concentration") || hasItemProperty(item, "con")) return true;
-  return getItemActivities(item).some((activity) => {
-    const duration = activity?.duration ?? activity?.activation?.duration ?? {};
-    return duration?.concentration === true || String(duration?.units ?? "").toLowerCase() === "concentration";
-  });
-}
-
-export function isConcentrationEffect(effect) {
-  if (!effect || effect.disabled === true || effect.isSuppressed === true) return false;
-  const statuses = asArray(effect.statuses).map((status) => String(status ?? "").toLowerCase());
-  const statusId = String(effect.flags?.core?.statusId ?? "").toLowerCase();
-  const name = String(effect.name ?? effect.label ?? "").toLowerCase();
-  return statuses.some((status) => status.includes("concentrat"))
-    || statusId.includes("concentrat")
-    || name.includes("concentrat");
 }
 
 export function itemDisplayName(item) {
