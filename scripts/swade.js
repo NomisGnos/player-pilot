@@ -465,6 +465,16 @@ export class SwadeModel extends BaseModel {
         ["consumable", "Consumables", "fa-flask"],
       ];
     }
+    if (view === "inventory") {
+      return [
+        ["all", "All", "fa-layer-group"],
+        ["weapon", "Weapons", "fa-sword"],
+        ["armor", "Armor", "fa-helmet-battle"],
+        ["shield", "Shields", "fa-shield"],
+        ["gear", "Gear", "fa-box-open"],
+        ["consumable", "Consumables", "fa-flask"],
+      ];
+    }
     return super.quickFiltersForKey(view);
   }
 
