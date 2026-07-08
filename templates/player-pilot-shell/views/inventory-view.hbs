@@ -25,5 +25,24 @@
                 </div>
             </div>
         {{/each}}
+
+{{log this}}
+        {{#if model.groups.currency}}
+            <div class="pp-currency">
+                <div class="pp-subtitle">Currency</div>
+                <div class="pp-currency-grid">
+                    {{#each model.groups.currency as |currency|}}
+                        <article class="pp-currency-card pp-currency-{{currency.key}}">
+                            <div class="pp-currency-icon">{{{currency.icon}}}</div>
+                            <div>
+                                <span>{{currency.label}}</span>
+                                <strong>{{currency.value}}</strong>
+                            </div>
+                            <button class="pp-action-btn" type="button" data-action="currencyDialog" data-denom="{{currency.key}}">Adjust</button>
+                        </article>
+                    {{/each}}
+                </div>
+            </div>
+        {{/if}}
     </section>
 </main>

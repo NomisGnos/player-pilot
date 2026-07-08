@@ -5,6 +5,7 @@ import {
   attackRollMode,
   executePlayerFirst,
   queueRender,
+  renderInterfaceIcon,
   setting
 } from "./player-pilot.js";
 import {
@@ -54,6 +55,14 @@ const DND5E_SKILL_LABELS = {
   sur: "Survival"
 };
 
+const DND5E_CURRENCY_LABELS = [
+  ["pp", "Platinum"],
+  ["gp", "Gold"],
+  ["ep", "Electrum"],
+  ["sp", "Silver"],
+  ["cp", "Copper"]
+];
+
 export class DnD5eModel extends BaseModel {
 
   static id = "dnd5e";
@@ -85,6 +94,9 @@ export class DnD5eModel extends BaseModel {
     },
     togglePrepared: async function (_event, button) {
       await game.playerPilot.model.togglePrepared(button.dataset.itemId);
+    },
+    currencyDialog: function (_event, button) {
+      game.playerPilot.model.openCurrencyDialog(button.dataset.denom);
     },
     toggleEquipped: async function (_event, button) {
       const itemId = button.dataset.itemId;
@@ -206,6 +218,7 @@ export class DnD5eModel extends BaseModel {
     this.refreshFeaturesGroup(items);
     this.refreshSpellSlotsGroup();
     this.refreshChecksGroup();
+    this.refreshCurrencyGroup();
   }
 
   refreshActionsGroup(items) {
@@ -298,6 +311,32 @@ export class DnD5eModel extends BaseModel {
         ability: String(data?.ability ?? data?.abilityKey ?? data?.baseAbility ?? "")
       });
     }
+  }
+
+  refreshCurrencyGroup() {
+    this.groups.currency = [];
+    const currency = this.actor?.system?.currency;
+    if (!currency) return;
+    const ordered = [];
+    for (const [key, label] of DND5E_CURRENCY_LABELS) {
+      if (Object.prototype.hasOwnProperty.call(currency, key)) ordered.push({
+        key,
+        label,
+        icon: renderInterfaceIcon(this.currencyIcon(key)),
+        value: Number(currency[key] ?? 0)
+      });
+    }
+    for (const [key, value] of Object.entries(currency)) {
+      if (ordered.some((existing) => existing.key === key)) continue;
+      const label = key.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+      ordered.push({
+        key,
+        label,
+        icon: renderInterfaceIcon(this.currencyIcon(key)),
+        value: Number(value ?? 0)
+      });
+    }
+    this.groups.currency = ordered.filter((entry) => Number.isFinite(entry.value));
   }
 
   normalizeItem(item, group = "items") {
@@ -1556,6 +1595,22 @@ export class DnD5eModel extends BaseModel {
   rest(actor, data) {
     if (data.restType === "long") return actor.longRest({ dialog: true, chat: true });
     return actor.shortRest({ dialog: true, chat: true });
+  }
+
+  async updateCurrency(key, delta) {
+    const actor = this.actor;
+    if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
+    const currency = this.groups.currency.find(c => c.key === key);
+    const current = currency.value;
+    if (!Number.isFinite(current)) return;
+    const next = Math.max(0, current + delta);
+    const label = currency.label;
+    await executePlayerFirst(
+      `${label} ${next}`,
+      async () => actor.update({ [`system.currency.${key}`]: next }),
+      "updateActorData",
+      { actorId: actor.id, updates: { [`system.currency.${key}`]: next }, label: `${label} ${next}` }
+    );
   }
 
   restRecoveryLabel(value) {

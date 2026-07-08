@@ -1,4 +1,4 @@
-import { BaseModel, CURRENCY_LABELS } from "./base-model.js";
+import { BaseModel } from "./base-model.js";
 import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
 import { PF2eModel } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
@@ -481,7 +481,7 @@ const BLOCKED_WHILE_PAUSED = new Set([
   "manual-roll",
   "qty",
   "currency",
-  "currency-dialog",
+  "currencyDialog",
   "target-toggle",
   "apply-targets",
   "ping-targets",
@@ -1991,22 +1991,6 @@ function renderFeatureGroups(items = [], empty = "No features found.") {
   }).join("");
 }
 
-function actorCurrencyEntries(actor, adapter = null) {
-  const adapted = adapter?.currencyEntries?.(actor);
-  if (Array.isArray(adapted)) return adapted;
-  const currency = actor?.system?.currency;
-  if (!currency || typeof currency !== "object") return [];
-  const ordered = [];
-  for (const [key, label] of CURRENCY_LABELS) {
-    if (Object.prototype.hasOwnProperty.call(currency, key)) ordered.push([key, label, Number(currency[key] ?? 0)]);
-  }
-  for (const [key, value] of Object.entries(currency)) {
-    if (ordered.some(([existing]) => existing === key)) continue;
-    const label = key.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-    ordered.push([key, label, Number(value ?? 0)]);
-  }
-  return ordered.filter((entry) => Number.isFinite(entry[2]));
-}
 
 function renderCurrency(actor) {
   const entries = actorCurrencyEntries(actor);
@@ -2022,7 +2006,7 @@ function renderCurrency(actor) {
               <span>${escapeHtml(label)}</span>
               <strong>${escapeHtml(value)}</strong>
             </div>
-            <button class="pp-action-btn" type="button" data-action="currency-dialog" data-denom="${escapeHtml(key)}">Adjust</button>
+            <button class="pp-action-btn" type="button" data-action="currencyDialog" data-denom="${escapeHtml(key)}">Adjust</button>
           </article>
         `).join("")}
       </div>
@@ -2635,14 +2619,6 @@ async function handleDocumentClick(event) {
   }
   if (action === "qty") {
     await updateItemQuantity(actionEl.dataset.itemId ?? "", Number(actionEl.dataset.delta ?? 0));
-    return;
-  }
-  if (action === "currency") {
-    await updateCurrency(actionEl.dataset.denom ?? "", Number(actionEl.dataset.delta ?? 0));
-    return;
-  }
-  if (action === "currency-dialog") {
-    openCurrencyDialog(actionEl.dataset.denom ?? "");
     return;
   }
   if (action === "target-toggle") {
@@ -3810,69 +3786,6 @@ async function updateItemQuantity(itemId, delta) {
   );
 }
 
-async function updateCurrency(denom, delta) {
-  const actor = currentActor();
-  const key = String(denom ?? "").trim();
-  if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
-  const model = game.playerPilot.model;
-  const current = Number(actorCurrencyEntries(actor, model).find(([entryKey]) => entryKey === key)?.[2] ?? NaN);
-  if (!Number.isFinite(current)) return;
-  const next = Math.max(0, current + delta);
-  const label = actorCurrencyEntries(actor, model).find(([entryKey]) => entryKey === key)?.[1] ?? key.toUpperCase();
-  if (typeof model.updateCurrency === "function") {
-    const appliedDelta = next - current;
-    if (!appliedDelta) return;
-    await executePlayerFirst(
-      `${label} ${next}`,
-      async () => model.updateCurrency(actor, key, appliedDelta),
-      "pf2eCurrency",
-      { actorId: actor.id, denomination: key, delta: appliedDelta, label: `${label} ${next}` }
-    );
-    queueRender();
-    return;
-  }
-  await executePlayerFirst(
-    `${label} ${next}`,
-    async () => actor.update({ [`system.currency.${key}`]: next }),
-    "updateActorData",
-    { actorId: actor.id, updates: { [`system.currency.${key}`]: next }, label: `${label} ${next}` }
-  );
-}
-
-function openCurrencyDialog(denom) {
-  const actor = currentActor();
-  const key = String(denom ?? "").trim();
-  const entry = actorCurrencyEntries(actor, game.playerPilot.model).find(([entryKey]) => entryKey === key);
-  if (!actor || !entry) return;
-  const [_key, label, current] = entry;
-  openModal(`
-    <h2>${escapeHtml(label)}</h2>
-    <p>Current amount: ${escapeHtml(current)}</p>
-    <label>Change</label>
-    <select class="pp-select" name="currencyMode">
-      <option value="add">Add</option>
-      <option value="subtract">Subtract</option>
-    </select>
-    <label>Amount</label>
-    <input class="pp-search" type="number" min="0" step="1" inputmode="numeric" name="currencyAmount" placeholder="0">
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-      <button class="pp-button primary" type="button" data-modal-action="applyCurrency">Apply</button>
-    </div>
-  `, {
-    applyCurrency: async (modal) => {
-      const amount = Math.floor(Number(modal.querySelector("[name='currencyAmount']")?.value ?? NaN));
-      if (!Number.isFinite(amount) || amount <= 0) {
-        ui.notifications?.warn?.("Enter an amount greater than 0.");
-        return;
-      }
-      const mode = modal.querySelector("[name='currencyMode']")?.value ?? "add";
-      closeModal();
-      await updateCurrency(key, mode === "subtract" ? -amount : amount);
-    }
-  });
-}
-
 async function updatePf2eResource(resource, delta) {
   const actor = currentActor();
   if (!actor || game.playerPilot.model.id !== "pf2e" || !Number.isFinite(delta) || delta === 0) return;
@@ -4690,10 +4603,6 @@ async function handleGmSocket(data) {
     await gmRun(data.label || "Updated equipment", data.userId, () => gmPf2eToggleEquipped(data));
     return;
   }
-  if (data.type === "pf2eCurrency") {
-    await gmRun(data.label || "Updated currency", data.userId, () => gmPf2eCurrency(data));
-    return;
-  }
   if (data.type === "pingPoint") {
     await pingPoint(data);
     return;
@@ -4931,12 +4840,6 @@ async function gmPf2eToggleEquipped(data) {
   }
   if (typeof game.playerPilot.model.toggleEquipped !== "function") throw new Error("PF2e equipment control unavailable.");
   await game.playerPilot.model.toggleEquipped(actor, item, data.equipped === true);
-}
-
-async function gmPf2eCurrency(data) {
-  const actor = gmActor(data.actorId);
-  if (!actor || typeof game.playerPilot.model.updateCurrency !== "function") throw new Error("PF2e currency control unavailable.");
-  await game.playerPilot.model.updateCurrency(actor, String(data.denomination ?? ""), Number(data.delta ?? 0));
 }
 
 async function gmUpdateItemData(data) {

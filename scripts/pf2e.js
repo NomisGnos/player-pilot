@@ -1,4 +1,4 @@
-import { BaseModel, CURRENCY_LABELS } from "./base-model.js";
+import { BaseModel } from "./base-model.js";
 import {
   activeGmIds,
   actorHasActiveTurn,
@@ -11,6 +11,7 @@ import {
   openModal,
   pilotPaused,
   queueRender,
+  renderInterfaceIcon,
   renderModalTargetPicker,
   renderRollInstructions,
   selectedTargetSet,
@@ -42,6 +43,14 @@ import {
   signedMod
 } from "./utils.js";
 
+
+const PF2E_CURRENCY_LABELS = [
+  ["pp", "Platinum"],
+  ["gp", "Gold"],
+  ["sp", "Silver"],
+  ["cp", "Copper"]
+];
+
 export class PF2eModel extends BaseModel {
 
   static id = "pf2e";
@@ -60,17 +69,20 @@ export class PF2eModel extends BaseModel {
   ]);
 
   static SHELL_ACTIONS = {
-    pf2eRest: async function () {
+    pf2eRest: function () {
       game.playerPilot.model.requestRest();
     },
-    rollInitiative: async function (_event, _button) {
+    rollInitiative: function (_event, _button) {
       game.playerPilot.model.openPf2eInitiativeDialog();
     },
-    pf2eStrike: async function (_event, button) {
+    pf2eStrike: function (_event, button) {
       game.playerPilot.model.runPf2eStrike(button.dataset);
     },
-    toggleEquipped: async function (_event, button) {
+    toggleEquipped: function (_event, button) {
       game.playerPilot.model.toggleEquipped(button.dataset.itemId);
+    },
+    currencyDialog: function (_event, button) {
+      game.playerPilot.model.openCurrencyDialog(button.dataset.denom);
     },
   };
 
@@ -150,6 +162,7 @@ export class PF2eModel extends BaseModel {
     this.refreshFeaturesGroup(items);
     this.refreshSpellSlotsGroup();
     this.refreshChecksGroup();
+    this.refreshCurrencyGroup();
   }
 
   refreshActionsGroup(items) {
@@ -248,6 +261,20 @@ export class PF2eModel extends BaseModel {
     if (actor?.perception) {
       this.groups.checks.unshift({ kind: "perception", key: "perception", name: "Perception", badge: "Perception", category: "checks", formula: d20Formula(actor.perception.mod ?? 0), ability: "wis" });
     }
+  }
+
+  refreshCurrencyGroup() {
+    this.groups.currency = [];
+    const currency = this.actor?.inventory.currency;
+    if (!currency) return;
+    this.groups.currency = PF2E_CURRENCY_LABELS
+      .map(([key, label]) => ({
+        key,
+        label,
+        icon: renderInterfaceIcon(this.currencyIcon(key)),
+        value: Number(currency[key] ?? 0)
+      }))
+      .filter((entry) => Number.isFinite(entry.value));
   }
 
   normalizeItem(item, group = "items") {
@@ -878,15 +905,6 @@ export class PF2eModel extends BaseModel {
     return entries.slice(0, 10);
   }
 
-  currencyEntries(actor) {
-    const currency = actor?.inventory?.currency;
-    if (!currency || typeof currency !== "object") return [];
-    return CURRENCY_LABELS
-      .filter(([key]) => key !== "ep")
-      .map(([key, label]) => [key, label, Number(currency[key] ?? 0)])
-      .filter((entry) => Number.isFinite(entry[2]));
-  }
-
   async rollCheck(kind, key) {
     const actor = this.actor;
     const event = this.pf2eSyntheticRollEvent();
@@ -1025,15 +1043,24 @@ export class PF2eModel extends BaseModel {
     });
   };
 
-  async updateCurrency(actor, denomination, delta) {
-    const coins = { [denomination]: Math.abs(Number(delta ?? 0)) };
-    if (delta > 0 && typeof actor?.inventory?.addCoins === "function") return actor.inventory.addCoins(coins);
-    if (delta < 0 && typeof actor?.inventory?.removeCoins === "function") {
+  async updateCurrency(key, delta) {
+    const actor = this.actor;
+    if (!actor || !key || !Number.isFinite(delta) || delta === 0) return;
+    const currency = this.groups.currency.find(c => c.key === key);
+    const current = currency.value;
+    if (!Number.isFinite(current)) return;
+    const next = Math.max(0, current + delta);
+    const appliedDelta = next - current;
+    if (!appliedDelta) return;
+    const coins = { [key]: Math.abs(Number(appliedDelta ?? 0)) };
+    if (appliedDelta > 0) return actor.inventory.addCoins(coins);
+    if (appliedDelta < 0) {
       const removed = await actor.inventory.removeCoins(coins);
       if (!removed) ui.notifications?.warn?.("Not enough currency.");
       return removed;
     }
-  };
+    queueRender();
+  }
 
   async executeStrike(actor, data = {}) {
     const strike = this.pf2eFindStrike(actor, data);
@@ -1559,7 +1586,6 @@ export class PF2eModel extends BaseModel {
       return raw;
     }
   }
-
 
   spellDetailRows(item) {
     if (item?.type !== "spell") return [];

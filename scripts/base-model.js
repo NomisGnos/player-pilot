@@ -1,13 +1,6 @@
-import { renderInterfaceIcon, setting, state } from "./player-pilot.js";
+import { closeModal, openModal, renderInterfaceIcon, setting, state } from "./player-pilot.js";
 import { escapeHtml, htmlToPlain, itemDisplayName, resolveNumericFormula } from "./utils.js";
 
-export const CURRENCY_LABELS = [
-  ["pp", "Platinum"],
-  ["gp", "Gold"],
-  ["ep", "Electrum"],
-  ["sp", "Silver"],
-  ["cp", "Copper"]
-];
 
 export class BaseModel {
 
@@ -352,5 +345,51 @@ export class BaseModel {
       return `${base}${recovery ? `, resets on ${recovery}` : ""}`;
     }
     return "";
+  }
+
+  currencyIcon(key) {
+    return ({
+      pp: "fa-gem",
+      gp: "fa-coins",
+      ep: "fa-circle",
+      sp: "fa-coins",
+      cp: "fa-circle-dot"
+    })[String(key ?? "").toLowerCase()] ?? "fa-coins";
+  }
+
+  openCurrencyDialog(denom) {
+    const actor = this.actor;
+    const key = String(denom ?? "").trim();
+    const currency = this.groups.currency.find(c => c.key === key);
+    if (!actor || !currency) return;
+    openModal(`
+      <h2>${escapeHtml(currency.label)}</h2>
+      <p>Current amount: ${escapeHtml(currency.current)}</p>
+      <label>Change</label>
+      <select class="pp-select" name="currencyMode">
+        <option value="add">Add</option>
+        <option value="subtract">Subtract</option>
+      </select>
+      <label>Amount</label>
+      <input class="pp-search" type="number" min="0" step="1" inputmode="numeric" name="currencyAmount" placeholder="0">
+      <div class="pp-dialog-actions">
+        <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+        <button class="pp-button primary" type="button" data-modal-action="applyCurrency">Apply</button>
+      </div>
+    `, {
+      applyCurrency: async (modal) => {
+        const amount = Math.floor(Number(modal.querySelector("[name='currencyAmount']")?.value ?? NaN));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          ui.notifications?.warn?.("Enter an amount greater than 0.");
+          return;
+        }
+        const mode = modal.querySelector("[name='currencyMode']")?.value ?? "add";
+        closeModal();
+        await this.updateCurrency(currency.key, mode === "subtract" ? -amount : amount);
+      }
+    });
+  }
+
+  async updateCurrency(_key, _delta) {
   }
 }
