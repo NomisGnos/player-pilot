@@ -4,7 +4,6 @@ import {
   addLog,
   attackRollMode,
   executePlayerFirst,
-  invalidateModelCache,
   queueRender,
   setting
 } from "./player-pilot.js";
@@ -75,16 +74,19 @@ export class DnD5eModel extends BaseModel {
   ]);
 
   static SHELL_ACTIONS = {
-    exhaustion: async function (event, button) {
+    exhaustion: async function (_event, button) {
       await game.playerPilot.model.updateExhaustion(Number(button.dataset.delta ?? 0));
     },
-    dnd5eRest: async function (event, button) {
+    dnd5eRest: async function (_event, button) {
       await game.playerPilot.model.requestRest(button.dataset.rest);
     },
-    togglePrepared: async function (event, button) {
+    rollInitiative: async function (_event, _button) {
+      await game.playerPilot.model.rollCheck("initiative", "initiative");
+    },
+    togglePrepared: async function (_event, button) {
       await game.playerPilot.model.togglePrepared(button.dataset.itemId);
     },
-    toggleEquipped: async function (event, button) {
+    toggleEquipped: async function (_event, button) {
       const itemId = button.dataset.itemId;
       const actor = this.currentActor;
       const item = actor?.items.get(itemId);
@@ -132,7 +134,8 @@ export class DnD5eModel extends BaseModel {
       display: `${numberText(hp.value)} / ${numberText(hp.max)}`,
       value: hp.value,
       max: hp.max,
-      temp: hp.temporary,
+      temp: hp.temp,
+      tempWidth: clamp((hp.temp / Math.max(hp.max || hp.temp, 1)) * 100, 5, 100),
       pct: hp.max > 0 ? (hp.value / hp.max) * 100 : 0,
     };
 
@@ -490,14 +493,6 @@ export class DnD5eModel extends BaseModel {
     return "";
   }
 
-  isInventoryItem(item) {
-    return item.type === "gear" ||
-      item.type === "weapon" ||
-      item.type === "armor" ||
-      item.type === "shield" ||
-      item.type === "consumable";
-  }
-
   itemHasActionTiming(item) {
     const timingTypes = new Set(["action", "bonus", "reaction", "bonus action"]);
     const activation = String(item?.activation ?? "").toLowerCase();
@@ -512,6 +507,10 @@ export class DnD5eModel extends BaseModel {
       return item.special === true || item.ammoRequired === true || !!item.usesText || game.playerPilot.model.itemHasActionTiming(item);
     }
     return ["consumable", "tool", "equipment"].includes(item.type);
+  }
+
+  isInventoryItem(item) {
+    return ["weapon", "equipment", "consumable", "tool", "loot", "backpack"].includes(item.type);
   }
 
   itemIsSpecialFeature(item) {
@@ -609,6 +608,33 @@ export class DnD5eModel extends BaseModel {
       ]
     };
     return quickFilters[view] ?? [];
+  }
+
+  matchesOneQuickFilter(key, filter, item) {
+    if (filter === "cantrip") return item.type === "spell" && Number(item.level ?? 0) === 0;
+    if (filter === "prepared") { return item.type === "spell" && (item.prepared || Number(item.level ?? 0) === 0 || ["always", "atwill", "innate", "pact"].includes(item.preparationMode)); }
+    if (filter === "focus") return item.type === "spell" && item.preparationMode === "focus";
+    if (filter === "spontaneous") return item.type === "spell" && item.preparationMode === "spontaneous";
+    if (filter === "innate") return item.type === "spell" && item.preparationMode === "innate";
+    if (filter === "sustained") return item.sustained === true;
+    if (filter === "concentration") return item.concentration === true;
+    if (filter === "ritual") return item.ritual === true;
+    if (key === "actionTiming") return item.activation === filter;
+    if (key === "actionSpellTraits") {
+      if (filter === "concentration") return item.concentration === true;
+      if (filter === "sustained") return item.sustained === true;
+      return item.ritual === true;
+    }
+    if (filter === "equipment") return ["equipment", "armor", "shield"].includes(item.type);
+    if (filter === "ammo") return item.type === "ammo";
+    if (filter === "backpack") return ["backpack", "container"].includes(item.type) || !!item.containerName;
+    if (key === "features" && ["class", "ancestry", "skill", "general"].includes(filter)) {
+      return item.type === filter || (filter === "ancestry" && item.type === "heritage");
+    }
+    if (key === "actions" && filter === "item") return ["consumable", "tool", "equipment", "loot"].includes(item.type);
+    if (key === "actions" && filter === "feature") return ["feat", "class", "subclass", "classfeature", "action", "race", "background"].includes(item.type);
+    if (item.activation === filter) return true;
+    return super.matchesOneQuickFilter(key, filter, item);
   }
 
   isTabAvailable(tab) {
@@ -1500,10 +1526,10 @@ export class DnD5eModel extends BaseModel {
       { actorId: actor.id, updates: this.exhaustionUpdateData(actor, next), label: `Exhaustion ${next}` }
     );
     if (updated) {
-      invalidateModelCache();
+      this.invalidateModelCache();
       queueRender();
       window.setTimeout(() => {
-        invalidateModelCache();
+        this.invalidateModelCache();
         queueRender();
       }, 250);
     }
@@ -1521,14 +1547,15 @@ export class DnD5eModel extends BaseModel {
     const normalized = String(restType).toLowerCase() === "long" ? "long" : "short";
     await executePlayerFirst(
       `${capitalizeWords(normalized)} rest`,
-      async () => {
-        if (normalized === "long" && typeof actor.longRest === "function") return actor.longRest({ dialog: true, chat: true });
-        if (normalized === "short" && typeof actor.shortRest === "function") return actor.shortRest({ dialog: true, chat: true });
-        throw new Error("Rest method not available locally.");
-      },
+      async () => { this.rest(actor, { restType: normalized }); },
       "rest",
       { actorId: actor.id, restType: normalized }
     );
+  }
+
+  rest(actor, data) {
+    if (data.restType === "long") return actor.longRest({ dialog: true, chat: true });
+    return actor.shortRest({ dialog: true, chat: true });
   }
 
   restRecoveryLabel(value) {

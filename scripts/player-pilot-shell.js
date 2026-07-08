@@ -1,9 +1,7 @@
 import {
   SUPPORT_URL,
   applySearchFilter,
-  cachedModel,
   isMultiFilterKey,
-  openPf2eInitiativeDialog,
   queueRender,
   renderDieGlyph,
   renderInterfaceIcon,
@@ -23,7 +21,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       positioned: false
     },
     actions: {
-      changeTab: function (event, button) {
+      changeTab: function (_event, button) {
         const tab = button.dataset.tab;
         state.scrollBodyToTop = tab !== state.activeTab;
         state.activeTab = tab;
@@ -41,7 +39,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
         this.render(true);
       },
-      quickFilter: function (event, button) {
+      quickFilter: function (_event, button) {
         const key = button.dataset.filterKey ?? state.activeTab;
         const value = button.dataset.filter ?? "all";
         if (button.dataset.multi === "true" || isMultiFilterKey(key)) {
@@ -55,15 +53,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
         }
         queueRender();
       },
-      rollInitiative: async function (event, button) {
-        const model = cachedModel(this.currentActor);
-        if (model.id === "pf2e") {
-          openPf2eInitiativeDialog();
-        } else {
-          await rollCheck("initiative", "initiative");
-        }
-      },
-      rollCheck: async function (event, button) {
+      rollCheck: async function (_event, button) {
         await rollCheck(button.dataset.kind ?? "", button.dataset.key ?? "");
       }
     },
@@ -182,7 +172,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     return representative ?? ownedActors[0];
   }
 
-  updateScrollTopButton(event) {
+  updateScrollTopButton(_event) {
     //TODO: Add scroll to top button
     const body = this.element.querySelector(".pp-body");
     const button = this.element.querySelector(".pp-scroll-top");

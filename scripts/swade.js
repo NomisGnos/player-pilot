@@ -383,7 +383,7 @@ export class SwadeModel extends BaseModel {
     return (item.system.shots ?? 0) > 0 || !!item.system.ammo;
   }
 
-  itemTargetInfo(item, activityId = "") {
+  itemTargetInfo(item, _activityId = "") {
     const targetInfo = {
       count: 0,
       needsTarget: false,
@@ -452,6 +452,16 @@ export class SwadeModel extends BaseModel {
     return super.quickFiltersForKey(view);
   }
 
+  matchesOneQuickFilter(key, filter, item) {
+    if (item.arcane !== undefined) {
+      if (item.arcane.toLowerCase() === filter ||
+        (!item.arcane && filter === "general")) {
+        return true;
+      }
+    }
+    return super.matchesOneQuickFilter(key, filter, item);
+  }
+
   isTabAvailable(tab) {
     if (tab.key === "powers") {
       return this.groups.powers.groups.length;
@@ -459,7 +469,7 @@ export class SwadeModel extends BaseModel {
     return super.isTabAvailable(tab);
   }
 
-  async useItem(actor, item, options = {}) {
+  async useItem(actor, item, _options = {}) {
     if (game.brsw) {
       game.brsw.create_item_card(actor, item.id);
     } else {

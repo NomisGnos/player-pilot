@@ -50,19 +50,19 @@
             <strong>{{summary.focusValue}} / {{summary.focusMax}}</strong>
             <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="1" title="Recover a Focus Point"><i class="fas fa-plus"></i></button>
           </div>
-        {{else}}
-          <div class="pp-pf2e-condition-panel">
-            <div class="pp-pf2e-condition-values">
-              <span title="At your maximum Dying value, your character dies."><i class="fas fa-heart-crack"></i><b>Dying</b><strong>{{summary.dyingValue}} / {{summary.dyingMax}}</strong></span>
-              <span title="When you recover from Dying, Wounded increases and affects the next time you gain Dying."><i class="fas fa-bandage"></i><b>Wounded</b><strong>{{summary.woundedValue}} / {{summary.woundedMax}}</strong></span>
-              <span title="Doomed lowers your maximum Dying value."><i class="fas fa-skull"></i><b>Doomed</b><strong>{{summary.doomedValue}} / {{summary.doomedMax}}</strong></span>
-            </div>
-            <button class="pp-action-btn" type="button" data-action="roll-check" data-kind="recovery" data-key="recovery" title="{{#if summary.dyingValue}}Roll a DC {{summary.recoveryDc}} recovery check{{else}}Recovery checks are only rolled while Dying{{/if}}" {{#unless summary.dyingValue}}disabled{{/unless}}>
-              Recovery Check{{#if summary.dyingValue}}(DC {{summary.recoveryDc}}){{/if}}
-            </button>
-            <small>These values mirror PF2e conditions. Recovery checks are available only while Dying.</small>
-          </div>
         {{/if}}
+
+        <div class="pp-pf2e-condition-panel">
+          <div class="pp-pf2e-condition-values">
+            <span title="At your maximum Dying value, your character dies."><i class="fas fa-heart-crack"></i><b>Dying</b><strong>{{summary.dyingValue}} / {{summary.dyingMax}}</strong></span>
+            <span title="When you recover from Dying, Wounded increases and affects the next time you gain Dying."><i class="fas fa-bandage"></i><b>Wounded</b><strong>{{summary.woundedValue}} / {{summary.woundedMax}}</strong></span>
+            <span title="Doomed lowers your maximum Dying value."><i class="fas fa-skull"></i><b>Doomed</b><strong>{{summary.doomedValue}} / {{summary.doomedMax}}</strong></span>
+          </div>
+          <button class="pp-action-btn" type="button" data-action="roll-check" data-kind="recovery" data-key="recovery" title="{{#if summary.dyingValue}}Roll a DC {{summary.recoveryDc}} recovery check{{else}}Recovery checks are only rolled while Dying{{/if}}" {{#unless summary.dyingValue}}disabled{{/unless}}>
+            Recovery Check{{#if summary.dyingValue}}(DC {{summary.recoveryDc}}){{/if}}
+          </button>
+          <small>These values mirror PF2e conditions. Recovery checks are available only while Dying.</small>
+        </div>
       </div>
 
       <div class="pp-ability-grid">

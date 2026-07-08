@@ -1,46 +1,21 @@
-import { BaseModel } from "./base-model.js";
-import {
-  CURRENCY_LABELS,
-  abilityDisplayIcon,
-  activitySystem,
-  getItemActivities,
-  itemDisplayName,
-  itemIsEquippable,
-  itemIsEquipped,
-  itemPlayerChoice,
-  itemTargetInfo,
-  selectedItemActivity,
-  spellDetailRows,
-  usableItemActivities
-} from "./generic.js";
-import {
-  PF2E_ADAPTER,
-  normalizePf2eItem,
-  pf2eCarryState,
-  pf2eFindStrike,
-  pf2eInitiativeOptions,
-  pf2eIsCantrip,
-  pf2eSpellRank,
-  pf2eSpellcastingEntry,
-  pf2eTraits
-} from "./pf2e.js";
+import { BaseModel, CURRENCY_LABELS } from "./base-model.js";
+import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
+import { PF2eModel } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
 import { SwadeModel } from "./swade.js";
-import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
 import {
   asArray,
   capitalizeWords,
   clamp,
   cleanFoundrySyntax,
   cleanRulesText,
-  d20Formula,
   escapeHtml,
   fieldText,
   formatActionTime,
   hasItemProperty,
   htmlToPlain,
+  itemDisplayName,
   localize,
-  localizedFieldLabel,
   signedMod,
   unitLabel
 } from "./utils.js";
@@ -552,11 +527,11 @@ function userIdsForPilots(activeOnly = true) {
     .map((user) => user.id);
 }
 
-function pilotPaused() {
+export function pilotPaused() {
   return game.paused === true && !game.user?.isGM;
 }
 
-function warnPaused() {
+export function warnPaused() {
   ui.notifications?.warn?.("The game is paused.");
   addLog("Game paused");
 }
@@ -771,17 +746,17 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
   };
 }
 
-function selectedTargetSet(sceneId = state.scene?.id ?? "") {
+export function selectedTargetSet(sceneId = state.scene?.id ?? "") {
   const id = String(sceneId ?? "");
   if (!state.selectedTargets[id]) state.selectedTargets[id] = [];
   return new Set(state.selectedTargets[id]);
 }
 
-function setSelectedTargetSet(sceneId, set) {
+export function setSelectedTargetSet(sceneId, set) {
   state.selectedTargets[String(sceneId ?? "")] = Array.from(set);
 }
 
-function clearUseTargets() {
+export function clearUseTargets() {
   const sceneId = String(state.scene?.id ?? "");
   setSelectedTargetSet(sceneId, new Set());
   applyTargetsForCurrentUser([], sceneId);
@@ -896,10 +871,10 @@ async function enrichRulesHtml(value, relativeTo = null) {
 
 function itemRequiresMapPlacement(item, activityId = "") {
   if (item?.type !== "spell") return false;
-  const selected = activityId ? selectedItemActivity(item, activityId)?.activity : null;
+  const selected = activityId ? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity : null;
   const sources = selected
-    ? [activitySystem(selected), item?.system]
-    : [item?.system, ...getItemActivities(item).map(activitySystem)];
+    ? [game.playerPilot.model.activitySystem(selected), item?.system]
+    : [item?.system, ...game.playerPilot.model.getItemActivities(item).map(game.playerPilot.model.activitySystem)];
   if (sources.some((source) => fieldText(source?.target?.template?.type, source?.target?.area?.type))) return true;
   const text = htmlToPlain(item?.system?.description?.value ?? item?.system?.description ?? "").toLowerCase();
   const name = String(item?.name ?? "").toLowerCase();
@@ -909,7 +884,7 @@ function itemRequiresMapPlacement(item, activityId = "") {
 }
 
 function renderSpellDetails(item) {
-  const rows = Array.isArray(item?.spellDetails) && item.spellDetails.length ? item.spellDetails : spellDetailRows(item);
+  const rows = Array.isArray(item?.spellDetails) && item.spellDetails.length ? item.spellDetails : game.playerPilot.model.spellDetailRows(item);
   if (!rows.length) return "";
   return `
     <table class="pp-spell-details">
@@ -1145,7 +1120,6 @@ async function registerHandlebarsHelpers() {
     renderRollsView,
     renderSpellsView,
     renderFeaturesView,
-    renderItemView,
     renderMapView,
     renderSmartBadge,
     renderBadge,
@@ -1510,93 +1484,6 @@ function renderSearchInput(placeholder) {
   `;
 }
 
-const QUICK_FILTERS = {
-  actions: [
-    ["all", "All", "fa-layer-group"],
-    ["weapon", "Weapons", "fa-sword"],
-    ["spell", "Spells", "fa-wand-magic-sparkles"],
-    ["item", "Items", "fa-flask"],
-    ["feature", "Class Features", "fa-star"]
-  ],
-  actionTiming: [
-    ["all", "All Actions", "fa-layer-group"],
-    ["action", "Action", "fa-bolt"],
-    ["bonus", "Bonus Action", "fa-circle-plus"],
-    ["reaction", "Reaction", "fa-reply"]
-  ],
-  actionSpellTraits: [
-    ["all", "All Spells", "fa-wand-magic-sparkles"],
-    ["concentration", "Concentration", "fa-brain"],
-    ["ritual", "Ritual", "fa-book-open"]
-  ],
-  spells: [
-    ["all", "All"],
-    ["cantrip", "Cantrip"],
-    ["prepared", "Prepared"],
-    ["concentration", "Concentration"],
-    ["ritual", "Ritual"]
-  ],
-  features: [
-    ["all", "All", "fa-layer-group"],
-    ["feat", "Features", "fa-star"],
-    ["class", "Class", "fa-graduation-cap"],
-    ["race", "Race", "fa-users"],
-    ["background", "Background", "fa-scroll"]
-  ],
-  inventory: [
-    ["all", "All", "fa-layer-group"],
-    ["weapon", "Weapons", "fa-sword"],
-    ["equipment", "Equipment", "fa-shield-halved"],
-    ["consumable", "Consumables", "fa-flask"],
-    ["backpack", "Containers", "fa-box-open"],
-    ["quantity", "Has Quantity", "fa-hashtag"]
-  ]
-};
-
-const PF2E_QUICK_FILTERS = {
-  actionTiming: [
-    ["all", "All Actions", "fa-layer-group"],
-    ["action1", "1 Action", "fa-1"],
-    ["action2", "2 Actions", "fa-2"],
-    ["action3", "3 Actions", "fa-3"],
-    ["reaction", "Reaction", "fa-reply"],
-    ["free", "Free Action", "fa-feather"],
-    ["passive", "Passive", "fa-eye"]
-  ],
-  actionSpellTraits: [
-    ["all", "All Spells", "fa-wand-magic-sparkles"],
-    ["focus", "Focus", "fa-bullseye"],
-    ["sustained", "Sustained", "fa-arrows-rotate"],
-    ["ritual", "Ritual", "fa-book-open"]
-  ],
-  spells: [
-    ["all", "All"],
-    ["cantrip", "Cantrip"],
-    ["focus", "Focus"],
-    ["prepared", "Prepared"],
-    ["spontaneous", "Spontaneous"],
-    ["innate", "Innate"],
-    ["ritual", "Ritual"]
-  ],
-  features: [
-    ["all", "All", "fa-layer-group"],
-    ["class", "Class", "fa-graduation-cap"],
-    ["ancestry", "Ancestry", "fa-users"],
-    ["skill", "Skill", "fa-hand-sparkles"],
-    ["general", "General", "fa-star"],
-    ["action", "Actions", "fa-bolt"]
-  ],
-  inventory: [
-    ["all", "All", "fa-layer-group"],
-    ["weapon", "Weapons", "fa-sword"],
-    ["equipment", "Armor & Equipment", "fa-shield-halved"],
-    ["consumable", "Consumables", "fa-flask"],
-    ["ammo", "Ammunition", "fa-bullseye"],
-    ["backpack", "Containers", "fa-box-open"],
-    ["quantity", "Has Quantity", "fa-hashtag"]
-  ]
-};
-
 export function quickFilterFor(key) {
   const value = state.quickFilters?.[key];
   return Array.isArray(value) ? (value[0] ?? "all") : (value ?? "all");
@@ -1917,7 +1804,7 @@ function renderCheckGroups(checks = []) {
       label,
       check: abilityChecks.find((entry) => entry.key === key),
       save: abilitySaves.find((entry) => entry.key === key),
-      icon: abilityDisplayIcon(key),
+      icon: game.playerPilot.model.abilityDisplayIcon(key),
     })).filter((entry) => entry.check || entry.save)
     : [];
   const buckets = [
@@ -2223,7 +2110,7 @@ function renderPf2eStrikeCard(item) {
       <div class="pp-card-primary-controls">
         <div></div>
         <div>
-          <button class="pp-use-compact" type="button" data-action="pf2e-strike" data-operation="flow" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}" ${item.usable ? "" : "disabled"}>
+          <button class="pp-use-compact" type="button" data-action="pf2eStrike" data-operation="flow" data-item-id="${escapeHtml(strike.itemId)}" data-strike-index="${escapeHtml(strike.index)}" data-strike-slug="${escapeHtml(strike.slug)}" ${item.usable ? "" : "disabled"}>
             <i class="fas fa-burst"></i><span>Strike</span>
           </button>
         </div>
@@ -2339,7 +2226,7 @@ function rollCardIcon(check = {}) {
   if (["fortitude", "fort"].includes(key)) return "fa-heart-pulse";
   if (["reflex", "ref"].includes(key)) return "fa-person-running";
   if (key === "will") return "fa-brain";
-  if (check.ability) return abilityDisplayIcon(check.ability);
+  if (check.ability) return game.playerPilot.model.abilityDisplayIcon(check.ability);
   if (String(check.kind ?? "").toLowerCase().includes("save")) return "fa-shield-halved";
   return "pp-die-d20";
 }
@@ -2351,7 +2238,7 @@ function describeFormula(formula) {
   return `Roll ${text}`;
 }
 
-function displayedTargetTokens(scene = state.scene) {
+export function displayedTargetTokens(scene = state.scene) {
   const tokens = scene?.tokens ?? [];
   if (!tokens.length) return [];
   const combatIds = new Set(scene?.combatTokenIds ?? []);
@@ -2726,24 +2613,12 @@ async function handleDocumentClick(event) {
     await updatePf2eResource(actionEl.dataset.resource ?? "", Number(actionEl.dataset.delta ?? 0));
     return;
   }
-  if (action === "pf2e-strike") {
-    await runPf2eStrike(actionEl.dataset);
-    return;
-  }
   if (action === "use-item") {
     openUseDialog(actionEl.dataset.itemId ?? "");
     return;
   }
   if (action === "item-info") {
     await openItemInfoDialog(actionEl.dataset.itemId ?? "");
-    return;
-  }
-  if (action === "toggle-equipped") {
-    await toggleEquipped(actionEl.dataset.itemId ?? "");
-    return;
-  }
-  if (action === "pf2e-initiative") {
-    openPf2eInitiativeDialog();
     return;
   }
   if (action === "roll-check") {
@@ -2818,9 +2693,6 @@ async function handleDocumentClick(event) {
     state.mapPanY = 0;
     queueRender();
     return;
-  }
-  if (action === "rest") {
-    await requestRest(actionEl.dataset.rest ?? "short");
   }
 }
 
@@ -2922,13 +2794,13 @@ function openUseDialog(itemId, flowOptions = {}) {
   const ammo = model.ammoChoices?.(actor, item) ?? [];
   const concentration = model.concentrationWarning?.(actor, item) ?? "";
   const normalized = model.normalizeItem(item);
-  const activities = usableItemActivities(item);
-  const playerChoice = itemPlayerChoice(item, actor);
+  const activities = model.usableItemActivities(item);
+  const playerChoice = model.itemPlayerChoice(item, actor);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
-  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? pf2eSpellRank(item) : "") : "");
+  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : "") : "");
   const baseCastLevel = item.type === "spell"
-    ? (model.id === "pf2e" ? pf2eSpellRank(item) : Number(item.system?.level ?? 0))
+    ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
     : "";
   const instructions = model.collectRollInstructions(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
   const baseInstructionsFor = (activityId = "") => model.collectRollInstructions(item, actor, {
@@ -3043,7 +2915,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         <select class="pp-select" name="castLevel">
           ${slots.map((slot) => `<option value="${slot.level}">${escapeHtml(slot.label)}</option>`).join("")}
         </select>
-      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${model.id === "pf2e" && pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${model.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
+      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${model.id === "pf2e" && model.pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${model.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
       <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, model.id, baseInstructionsFor(defaultActivityId), baseCastLevel)}</div>
       ${ammo.length ? `
         <label>Ammo</label>
@@ -3211,8 +3083,8 @@ function getSneakAttackOption(actor) {
 }
 
 function weaponSupportsSneakAttack(item, activityId = "") {
-  const selected = selectedItemActivity(item, activityId)?.activity ?? null;
-  const data = activitySystem(selected);
+  const selected = game.playerPilot.model.selectedItemActivity(item, activityId)?.activity ?? null;
+  const data = game.playerPilot.model.activitySystem(selected);
   const attackType = fieldText(
     data?.attack?.type?.value,
     data?.attack?.type,
@@ -3272,7 +3144,7 @@ function assessSneakAttackApplicability(actor, item, activityId = "") {
       reason: "Choose a target before confirming whether Sneak Attack applies."
     };
   }
-  const activity = selectedItemActivity(item, activityId)?.activity ?? null;
+  const activity = game.playerPilot.model.selectedItemActivity(item, activityId)?.activity ?? null;
   const attackMode = attackRollMode(actor, activity);
   if (attackMode.rollMode === "disadvantage") {
     return {
@@ -3412,7 +3284,7 @@ function renderCastPreview(instructions = [], castLevel = "", adapterId = "", ba
   `;
 }
 
-function targetInstructionText(targetInfo = {}) {
+export function targetInstructionText(targetInfo = {}) {
   const count = Number(targetInfo.count ?? 0);
   if (Number.isFinite(count) && count > 1) return `Choose up to ${count} targets.`;
   if (Number.isFinite(count) && count === 1) return "Choose one target.";
@@ -3426,12 +3298,12 @@ function targetCountText(selected, targetInfo = {}) {
   return `${selected} selected`;
 }
 
-function updateModalTargetCount(selected, targetInfo = {}) {
+export function updateModalTargetCount(selected, targetInfo = {}) {
   const count = state.modal?.querySelector("[data-modal-target-count]");
   if (count) count.textContent = targetCountText(selected, targetInfo);
 }
 
-function renderModalTargetPicker(item) {
+export function renderModalTargetPicker(item) {
   if (!item?.targetInfo?.needsTarget && !item?.targetInfo?.canTarget) return "";
   const scene = state.scene;
   const tokens = displayedTargetTokens(scene).filter((token) => item.targetInfo.allowSelf || token.actorId !== state.actorId);
@@ -3492,109 +3364,8 @@ function tokenDistanceFeet(a, b) {
   return (Math.hypot(ax - bx, ay - by) / gridSize) * gridDistance;
 }
 
-function resolvePf2eFormula(formula, actor, item, castRank) {
-  const raw = String(formula ?? "").trim();
-  if (!raw || !raw.includes("@")) return raw;
-  const data = {
-    ...(actor?.getRollData?.() ?? {}),
-    ...(item?.getRollData?.({ castRank: Number(castRank) || pf2eSpellRank(item) }) ?? {})
-  };
-  try {
-    return Roll.replaceFormulaData?.(raw, data, { missing: 0, warn: false }) ?? raw;
-  } catch (_err) {
-    return raw;
-  }
-}
-
-function pf2eHeightenedDamageFormula(item, damageId, formula, castRank) {
-  const rank = Number(castRank ?? pf2eSpellRank(item));
-  const baseRank = Number(item?.baseRank ?? pf2eSpellRank(item));
-  const heightening = item?.system?.heightening;
-  const interval = Number(heightening?.interval ?? 0);
-  const scaling = String(heightening?.damage?.[damageId] ?? "").trim();
-  const times = interval > 0 ? Math.floor((rank - baseRank) / interval) : 0;
-  if (!scaling || times <= 0) return String(formula ?? "");
-  return `${formula} + ${times === 1 ? scaling : `${times} * (${scaling})`}`;
-}
-
-function collectPf2eRollInstructions(item, actor, options = {}) {
-  if (!item || !actor) return [];
-  const entries = [];
-  const castRank = Number(options.castLevel ?? pf2eSpellRank(item));
-  const entry = pf2eSpellcastingEntry(actor, item);
-  const statistic = entry?.statistic;
-  if (item.type === "spell" && (item.isAttack || pf2eTraits(item).includes("attack"))) {
-    const modifier = statistic?.check?.mod ?? statistic?.mod;
-    const nativeChoices = [];
-    for (let attackNumber = 1; attackNumber <= 3; attackNumber += 1) {
-      const mapPenalty = (attackNumber - 1) * 5;
-      const adjustedModifier = Number(modifier) - mapPenalty;
-      nativeChoices.push({
-        label: attackNumber === 1
-          ? (Number.isFinite(adjustedModifier) ? signedMod(adjustedModifier) : "Attack")
-          : (Number.isFinite(adjustedModifier) ? `${signedMod(adjustedModifier)} (MAP -${mapPenalty})` : `MAP -${mapPenalty}`),
-        formula: Number.isFinite(Number(modifier)) ? d20Formula(Number(modifier) - mapPenalty) : "",
-        nativeAction: "spellAttack",
-        attackNumber
-      });
-    }
-    entries.push({
-      kind: "attack",
-      label: "Spell Attack",
-      formula: Number.isFinite(Number(modifier)) ? d20Formula(Number(modifier)) : "",
-      detail: "Choose the attack that matches your current multiple attack penalty.",
-      nativeAction: "spellAttack",
-      nativeChoices,
-      castRank
-    });
-  }
-  if (item.type === "spell") {
-    const damageParts = [];
-    for (const [damageId, damage] of Object.entries(item.system?.damage ?? {})) {
-      const raw = pf2eHeightenedDamageFormula(item, damageId, damage?.formula ?? "", castRank);
-      const formula = resolvePf2eFormula(raw, actor, item, castRank);
-      if (!formula) continue;
-      const type = capitalizeWords(damage?.type ?? damage?.category ?? "Damage");
-      damageParts.push({
-        kind: (asArray(damage?.kinds).includes("healing") || String(damage?.kind ?? damage?.type ?? "").toLowerCase() === "healing") ? "healing" : "damage",
-        type,
-        formula
-      });
-    }
-    if (damageParts.length) {
-      const types = Array.from(new Set(damageParts.map((part) => part.type).filter((type) => type && type !== "Damage")));
-      const allHealing = damageParts.every((part) => part.kind === "healing");
-      const label = types.length === 1
-        ? `${types[0]} ${allHealing ? "Healing" : "Damage"}`
-        : `Spell ${allHealing ? "Healing" : "Damage"}`;
-      entries.push({
-        kind: allHealing ? "healing" : "damage",
-        label,
-        formula: damageParts.map((part) => part.formula).join(" + "),
-        detail: damageParts.length > 1
-          ? `PF2e rolls all ${damageParts.length} spell components together at rank ${castRank || pf2eSpellRank(item)}.`
-          : `PF2e spell ${allHealing ? "healing" : "damage"} at rank ${castRank || pf2eSpellRank(item)}.`,
-        nativeAction: "spellDamage",
-        castRank
-      });
-    }
-    const save = item.system?.defense?.save ?? item.system?.defense;
-    const saveType = fieldText(save?.statistic, save?.type);
-    const dc = statistic?.dc?.value;
-    if (saveType) {
-      entries.push({
-        kind: "save",
-        label: `${capitalizeWords(saveType)} Save`,
-        formula: "",
-        detail: Number.isFinite(Number(dc)) ? `Target rolls against DC ${Number(dc)}.` : "Resolve using the spellcasting DC."
-      });
-    }
-  }
-  return entries.slice(0, 10);
-}
-
 export function attackRollMode(actor, activity) {
-  const data = activitySystem(activity);
+  const data = game.playerPilot.model.activitySystem(activity);
   const mode = Number(data?.attack?.roll?.mode ?? data?.roll?.mode ?? 0);
   const all = new Set(actorConditionKeys(actor));
   const selectedIds = selectedTargetSet(state.scene?.id ?? "");
@@ -3678,35 +3449,7 @@ function openRollChoiceDialog(data = {}) {
   });
 }
 
-export function openPf2eInitiativeDialog() {
-  const actor = currentActor();
-  if (!actor) return;
-  const selected = String(actor.system?.initiative?.statistic ?? "perception");
-  const options = pf2eInitiativeOptions(actor);
-  openModal(`
-    <h2>Choose Initiative</h2>
-    <p>PF2e can roll initiative with Perception or a skill appropriate to what your character was doing when the encounter began.</p>
-    <div class="pp-choice-list pp-initiative-choices">
-      ${options.map((option) => `
-        <button class="pp-button ${option.key === selected ? "primary" : ""}" type="button" data-modal-action="rollInitiative" data-statistic="${escapeHtml(option.key)}">
-          <span>${escapeHtml(option.label)}</span>
-          <strong>${escapeHtml(signedMod(option.mod))}</strong>
-        </button>
-      `).join("")}
-    </div>
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-    </div>
-  `, {
-    rollInitiative: async (_modal, button) => {
-      const statistic = String(button.dataset.statistic ?? "perception");
-      closeModal();
-      await rollCheck("initiative", statistic);
-    }
-  });
-}
-
-function renderRollInstructions(instructions = [], allowManual = true) {
+export function renderRollInstructions(instructions = [], allowManual = true) {
   if (!instructions.length) return "";
   return `
     <div class="pp-roll-instructions">
@@ -3890,257 +3633,6 @@ export function actorHasActiveTurn(actor) {
   return getActorTokenCandidates(actor.id).some((token) => token.id === activeTokenId);
 }
 
-function findPf2eStrikeModel(actor, data = {}) {
-  return PF2E_ADAPTER.groups(actor).actions.find((item) => {
-    if (!item.pf2eStrike) return false;
-    return String(item.pf2eStrike.itemId) === String(data.itemId ?? "")
-      && (!data.strikeSlug || String(item.pf2eStrike.slug) === String(data.strikeSlug));
-  }) ?? null;
-}
-
-async function runPf2eStrike(data = {}) {
-  if (pilotPaused()) {
-    warnPaused();
-    return;
-  }
-  const actor = currentActor();
-  if (!actor) return;
-  const operation = String(data.operation ?? "attack");
-  if (operation === "flow") {
-    const strikeModel = findPf2eStrikeModel(actor, data);
-    if (strikeModel) await openPf2eStrikeFlowDialog(strikeModel, data);
-    return;
-  }
-  const currentTargets = selectedTargetSet(state.scene?.id ?? "");
-  if (operation === "attack" && !currentTargets.size && data.skipTargetPrompt !== true && data.skipTargetPrompt !== "true") {
-    const strikeModel = findPf2eStrikeModel(actor, data);
-    if (strikeModel && displayedTargetTokens(state.scene).some((token) => token.actorId !== actor.id)) {
-      await openPf2eStrikeFlowDialog(strikeModel, data);
-      return;
-    }
-  }
-  const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
-  const payload = {
-    actorId: actor.id,
-    itemId: String(data.itemId ?? ""),
-    strikeIndex: Number(data.strikeIndex ?? 0),
-    strikeSlug: String(data.strikeSlug ?? ""),
-    variantIndex: Number(data.variantIndex ?? 0),
-    operation,
-    sceneId: state.scene?.id ?? "",
-    targetIds
-  };
-  if (activeGmIds().length && sendSocket("pf2eStrike", payload)) {
-    showResultToast(`${capitalizeWords(payload.operation)} sent`, targetIds.length ? `${targetIds.length} target${targetIds.length === 1 ? "" : "s"}` : "");
-    return;
-  }
-  await executePlayerFirst(
-    `PF2e ${payload.operation}`,
-    async () => PF2E_ADAPTER.executeStrike(actor, payload),
-    "pf2eStrike",
-    payload
-  );
-}
-
-async function pf2eStrikeDamageFormula(actor, strikeModel, operation = "damage") {
-  const strike = pf2eFindStrike(actor, {
-    itemId: strikeModel?.pf2eStrike?.itemId,
-    strikeSlug: strikeModel?.pf2eStrike?.slug,
-    strikeIndex: strikeModel?.pf2eStrike?.index
-  });
-  const rollFn = operation === "critical" ? strike?.critical : strike?.damage;
-  if (typeof rollFn === "function") {
-    try {
-      const formula = await rollFn({ getFormula: true });
-      if (formula) return cleanRulesText(formula);
-    } catch (err) {
-      console.warn(`Player Pilot could not preview PF2e strike ${operation} formula.`, err);
-    }
-  }
-  const item = strike?.item ?? findItem(strikeModel?.pf2eStrike?.itemId);
-  const damage = item?.system?.damage ?? {};
-  const dice = Number(damage.dice ?? 0);
-  const die = String(damage.die ?? "").trim();
-  const modifier = Number(damage.modifier ?? 0);
-  if (dice > 0 && /^d\d+$/i.test(die)) {
-    const base = `${dice}${die}`;
-    const formula = modifier ? `${base} ${signedMod(modifier)}` : base;
-    return operation === "critical" ? `2 * (${formula})` : formula;
-  }
-  return "";
-}
-
-async function renderPf2eStrikeRollInstructions(strikeModel, strikeData = {}) {
-  const actor = currentActor();
-  const strike = strikeModel?.pf2eStrike ?? {};
-  const variants = strike.variants?.length ? strike.variants : [{ index: 0, label: "Attack", modifier: NaN }];
-  const firstModifier = Number(variants[0]?.modifier);
-  const damageFormula = strike.hasDamage && actor ? await pf2eStrikeDamageFormula(actor, strikeModel, "damage") : "";
-  const criticalFormula = strike.hasCritical && actor ? await pf2eStrikeDamageFormula(actor, strikeModel, "critical") : "";
-  const instructions = [{
-    kind: "attack",
-    label: "Attack Roll",
-    formula: Number.isFinite(firstModifier) ? d20Formula(firstModifier) : "",
-    detail: "Choose the attack that matches your current multiple attack penalty.",
-    nativeAction: "pf2eStrike",
-    modalAction: "rollPf2eStrike",
-    operation: "attack",
-    nativeChoices: variants.map((variant, idx) => {
-      const modifier = Number(variant.modifier);
-      const label = variant.label || (idx === 0 ? "Attack" : `MAP ${idx + 1}`);
-      return {
-        label: Number.isFinite(modifier) ? `${label} ${signedMod(modifier)}` : label,
-        buttonLabel: Number.isFinite(modifier) ? `${label} ${signedMod(modifier)}` : label,
-        formula: Number.isFinite(modifier) ? d20Formula(modifier) : label,
-        modalAction: "rollPf2eStrike",
-        operation: "attack",
-        variantIndex: Number(variant.index ?? idx),
-        primary: idx === 0
-      };
-    })
-  }];
-  if (strike.hasDamage) instructions.push({
-    kind: "damage",
-    label: "Damage",
-    formula: damageFormula,
-    detail: damageFormula ? "Normal strike damage after a hit." : "PF2e will calculate weapon, rune, trait, and effect damage when rolled.",
-    nativeAction: "pf2eStrike",
-    modalAction: "rollPf2eStrike",
-    operation: "damage",
-    variantIndex: Number(strikeData.variantIndex ?? 0),
-    buttonLabel: "Roll Damage"
-  });
-  if (strike.hasCritical) instructions.push({
-    kind: "damage",
-    label: "Critical Damage",
-    formula: criticalFormula,
-    detail: criticalFormula ? "Critical strike damage." : "PF2e will calculate critical damage when rolled.",
-    nativeAction: "pf2eStrike",
-    modalAction: "rollPf2eStrike",
-    operation: "critical",
-    variantIndex: Number(strikeData.variantIndex ?? 0),
-    buttonLabel: "Roll Critical"
-  });
-  return renderRollInstructions(instructions, true);
-}
-
-async function openPf2eStrikeFlowDialog(strikeModel, strikeData) {
-  const targetInfo = strikeModel.targetInfo;
-  clearUseTargets();
-  const canPickTargets = displayedTargetTokens(state.scene).some((token) => targetInfo.allowSelf || token.actorId !== state.actorId);
-  const targetStep = (targetInfo.needsTarget || targetInfo.canTarget) && canPickTargets;
-  const rollInstructions = await renderPf2eStrikeRollInstructions(strikeModel, strikeData);
-  openModal(`
-    <h2>Strike with ${escapeHtml(strikeModel.name)}</h2>
-    <div class="pp-use-step ${targetStep ? "" : "hidden"}" data-use-step="targets">
-      <p data-modal-target-summary>${escapeHtml(targetInstructionText(targetInfo))}</p>
-      <div data-modal-target-picker>${renderModalTargetPicker(strikeModel)}</div>
-    </div>
-    <div class="pp-use-step ${targetStep ? "hidden" : ""}" data-use-step="rolls">
-      <div class="pp-rolls-required-heading">
-        <i class="fas fa-list-check"></i>
-        <div>
-          <strong>Rolls Still Required</strong>
-          <span>Choose the MAP attack that applies, then roll damage or critical damage after the result.</span>
-        </div>
-      </div>
-      ${rollInstructions}
-    </div>
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-      <button class="pp-button primary ${targetStep ? "" : "hidden"}" type="button" data-modal-action="nextTargetStep">Next</button>
-      <button class="pp-button primary ${targetStep ? "hidden" : ""}" type="button" data-modal-action="close" data-final-done>Done</button>
-    </div>
-  `, {
-    modalToggleTarget: async (_modal, button) => {
-      if (button?.disabled || button?.dataset?.disabled === "true") return;
-      const tokenId = button?.dataset?.tokenId ?? "";
-      const sceneId = state.scene?.id ?? "";
-      const selected = selectedTargetSet(sceneId);
-      if (selected.has(tokenId)) selected.delete(tokenId);
-      else {
-        const limit = Number(targetInfo.count ?? 0);
-        if (Number.isFinite(limit) && limit > 0 && selected.size >= limit) {
-          ui.notifications?.warn?.(`Select up to ${limit} target${limit === 1 ? "" : "s"}.`);
-          return;
-        }
-        selected.add(tokenId);
-      }
-      setSelectedTargetSet(sceneId, selected);
-      applyTargetsForCurrentUser(Array.from(selected), sceneId);
-      state.modal?.querySelectorAll?.(".pp-token-row").forEach((row) => {
-        const rowButton = row.querySelector?.("[data-token-id]");
-        const active = rowButton && selected.has(rowButton.dataset.tokenId);
-        row.classList?.toggle?.("selected", active);
-        rowButton?.classList?.toggle?.("primary", active);
-        if (rowButton) rowButton.textContent = active ? "Targeted" : "Target";
-      });
-      updateModalTargetCount(selected.size, targetInfo);
-      sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: Array.from(selected) });
-    },
-    nextTargetStep: async (modal) => {
-      if (!selectedTargetSet(state.scene?.id ?? "").size) {
-        ui.notifications?.warn?.("Choose a target first.");
-        return;
-      }
-      modal.querySelector("[data-use-step='targets']")?.classList?.add?.("hidden");
-      modal.querySelector("[data-use-step='rolls']")?.classList?.remove?.("hidden");
-      modal.querySelector("[data-modal-action='nextTargetStep']")?.classList?.add?.("hidden");
-      modal.querySelector("[data-final-done]")?.classList?.remove?.("hidden");
-    },
-    rollPf2eStrike: async (_modal, button) => {
-      const operation = String(button?.dataset?.operation ?? "attack");
-      await runPf2eStrike({
-        ...strikeData,
-        operation,
-        variantIndex: Number(button?.dataset?.variantIndex ?? strikeData.variantIndex ?? 0),
-        skipTargetPrompt: true
-      });
-    }
-  });
-}
-
-function openPf2eStrikeTargetDialog(strikeModel, strikeData) {
-  const targetInfo = strikeModel.targetInfo;
-  openModal(`
-    <h2>Strike with ${escapeHtml(strikeModel.name)}</h2>
-    <p data-modal-target-summary>${escapeHtml(targetInstructionText(targetInfo))}</p>
-    <div data-modal-target-picker>${renderModalTargetPicker(strikeModel)}</div>
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-      <button class="pp-button primary" type="button" data-modal-action="rollStrike">Roll Strike</button>
-    </div>
-  `, {
-    modalToggleTarget: async (_modal, button) => {
-      if (button?.disabled || button?.dataset?.disabled === "true") return;
-      const tokenId = button?.dataset?.tokenId ?? "";
-      const sceneId = state.scene?.id ?? "";
-      const selected = selectedTargetSet(sceneId);
-      selected.clear();
-      selected.add(tokenId);
-      setSelectedTargetSet(sceneId, selected);
-      applyTargetsForCurrentUser([tokenId], sceneId);
-      state.modal?.querySelectorAll?.(".pp-token-row").forEach((row) => {
-        const rowButton = row.querySelector?.("[data-token-id]");
-        const active = rowButton?.dataset?.tokenId === tokenId;
-        row.classList?.toggle?.("selected", active);
-        rowButton?.classList?.toggle?.("primary", active);
-        if (rowButton) rowButton.textContent = active ? "Targeted" : "Target";
-      });
-      updateModalTargetCount(1, targetInfo);
-      sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: [tokenId] });
-    },
-    rollStrike: async () => {
-      if (!selectedTargetSet(state.scene?.id ?? "").size) {
-        ui.notifications?.warn?.("Choose a target first.");
-        return;
-      }
-      closeModal();
-      await runPf2eStrike({ ...strikeData, skipTargetPrompt: true });
-    }
-  });
-}
-
 async function runNativeItemRoll(item, action, castRank = "", attackNumber = "") {
   if (pilotPaused()) {
     warnPaused();
@@ -4155,7 +3647,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
     actorId: actor.id,
     itemId: item.id,
     nativeAction: String(action ?? ""),
-    castRank: Number.isFinite(requestedRank) && requestedRank > 0 ? requestedRank : pf2eSpellRank(item),
+    castRank: Number.isFinite(requestedRank) && requestedRank > 0 ? requestedRank : game.playerPilot.model.pf2eSpellRank(item),
     attackNumber: Number.isFinite(requestedAttack) && requestedAttack > 0 ? requestedAttack : 1,
     sceneId: state.scene?.id ?? "",
     targetIds
@@ -4166,7 +3658,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
   }
   await executePlayerFirst(
     `PF2e ${payload.nativeAction}`,
-    async () => PF2E_ADAPTER.nativeItemRoll(actor, item, payload.nativeAction, payload),
+    async () => game.playerPilot.model.nativeItemRoll(actor, item, payload.nativeAction, payload),
     "pf2eItemRoll",
     payload
   );
@@ -4318,97 +3810,6 @@ async function updateItemQuantity(itemId, delta) {
   );
 }
 
-async function toggleEquipped(itemId) {
-  const actor = currentActor();
-  const item = findItem(itemId);
-  if (!actor || !item) return;
-  const equippable = game.playerPilot.model.id === "pf2e" ? normalizePf2eItem(item).equippable : itemIsEquippable(item);
-  if (!equippable) return;
-  if (game.playerPilot.model.id === "pf2e") {
-    openPf2eCarryDialog(item);
-    return;
-  }
-  const next = !(game.playerPilot.model.id === "pf2e" ? item?.isEquipped === true : itemIsEquipped(item));
-  if (typeof game.playerPilot.model.toggleEquipped === "function") {
-    await executePlayerFirst(
-      next ? "Equipped item" : "Unequipped item",
-      async () => game.playerPilot.model.toggleEquipped(actor, item, next),
-      "pf2eToggleEquipped",
-      { actorId: actor.id, itemId, equipped: next, label: next ? "Equipped item" : "Unequipped item" }
-    );
-    queueRender();
-    return;
-  }
-  await executePlayerFirst(
-    next ? "Equipped item" : "Unequipped item",
-    async () => item.update({ "system.equipped": next }),
-    "updateItemData",
-    { actorId: actor.id, itemId, updates: { "system.equipped": next }, label: next ? "Equipped item" : "Unequipped item" }
-  );
-  queueRender();
-}
-
-function openPf2eCarryDialog(item) {
-  const actor = currentActor();
-  if (!actor || !item) return;
-  const usage = item.system?.usage ?? {};
-  const current = pf2eCarryState(item);
-  const hasStowingContainer = asArray(actor.itemTypes?.backpack).some((container) => container !== item && container.system?.stowing && !container.isInContainer);
-  const choices = [
-    { carryType: "held", handsHeld: 1, inSlot: false, label: "Held (1 hand)", icon: "fa-hand-fist" },
-    { carryType: "held", handsHeld: 2, inSlot: false, label: "Held (2 hands)", icon: "fa-hands" }
-  ];
-  if (String(usage.type ?? "") === "implanted") choices.push({ carryType: "implanted", handsHeld: 0, inSlot: false, label: "Implanted", icon: "fa-plug" });
-  if (usage.where) choices.push({ carryType: "worn", handsHeld: 0, inSlot: true, label: `Worn / Equipped (${localizedFieldLabel(`PF2E.Item.Physical.Usage.WornSlot.${usage.where}`, usage.where)})`, icon: "fa-shirt" });
-  choices.push({ carryType: "worn", handsHeld: 0, inSlot: false, label: "Carried", icon: "fa-shirt" });
-  if (hasStowingContainer) choices.push({ carryType: "stowed", handsHeld: 0, inSlot: false, label: "Stowed", icon: "fa-box" });
-  choices.push({ carryType: "dropped", handsHeld: 0, inSlot: false, label: "Dropped", icon: "fa-grip-lines" });
-  const isCurrent = (choice) => choice.carryType === current.carryType
-    && (choice.carryType !== "held" || choice.handsHeld === current.handsHeld)
-    && (choice.carryType !== "worn" || choice.inSlot === current.inSlot);
-  openModal(`
-    <h2>Carry ${escapeHtml(item.name)}</h2>
-    <p>PF2e tracks whether an item is held in one or two hands, worn, carried, stowed, or dropped. It does not distinguish left hand from right hand.</p>
-    <div class="pp-choice-list pp-carry-choices">
-      ${choices.map((choice) => `
-        <button class="pp-button ${isCurrent(choice) ? "primary" : ""}" type="button" data-modal-action="setCarry" data-carry-type="${escapeHtml(choice.carryType)}" data-hands-held="${escapeHtml(choice.handsHeld)}" data-in-slot="${choice.inSlot ? "true" : "false"}">
-          <i class="fas ${escapeHtml(choice.icon)}"></i>
-          <span>${escapeHtml(choice.label)}</span>
-        </button>
-      `).join("")}
-    </div>
-    <div class="pp-dialog-actions">
-      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-    </div>
-  `, {
-    setCarry: async (_modal, button) => {
-      closeModal();
-      await setPf2eCarry(item.id, {
-        carryType: button.dataset.carryType ?? "worn",
-        handsHeld: Number(button.dataset.handsHeld ?? 0),
-        inSlot: button.dataset.inSlot === "true"
-      });
-    }
-  });
-}
-
-async function setPf2eCarry(itemId, options = {}) {
-  const actor = currentActor();
-  const item = findItem(itemId);
-  if (!actor || !item || game.playerPilot.model?.id !== "pf2e" || typeof game.playerPilot.model.setCarry !== "function") return;
-  const label = options.carryType === "held"
-    ? `Held in ${Number(options.handsHeld) === 2 ? "2 hands" : "1 hand"}`
-    : capitalizeWords(options.carryType ?? "carried");
-  await executePlayerFirst(
-    label,
-    async () => game.playerPilot.model.setCarry(actor, item, options),
-    "pf2eToggleEquipped",
-    { actorId: actor.id, itemId, ...options, label }
-  );
-  invalidateModelCache();
-  queueRender();
-}
-
 async function updateCurrency(denom, delta) {
   const actor = currentActor();
   const key = String(denom ?? "").trim();
@@ -4519,63 +3920,6 @@ async function updateDeathSaves(kind) {
   }
 }
 
-export async function requestRest(restType) {
-  const actor = currentActor();
-  if (!actor) return;
-  if (setting("combatTurnLock", false) === true && !actorHasActiveTurn(actor)) {
-    ui.notifications?.warn?.("It is not this actor's turn.");
-    addLog("Turn locked");
-    return;
-  }
-  if (typeof game.playerPilot.model.rest === "function") {
-    const gmIds = activeGmIds();
-    if (game.playerPilot.model.id === "pf2e" && gmIds.length) {
-      sendSocket("rest", {
-        targetUserIds: [gmIds[0]],
-        actorId: actor.id,
-        restType: "night"
-      });
-      addLog("Rest for the Night sent to GM");
-      showResultToast("Rest request sent", "The GM has the PF2e confirmation.");
-      return;
-    }
-    if (game.playerPilot.model.id === "pf2e") {
-      openModal(`
-        <h2>Rest for the Night?</h2>
-        <p>PF2e will recover the character according to its Rest for the Night rules.</p>
-        <div class="pp-dialog-actions">
-          <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
-          <button class="pp-button primary" type="button" data-modal-action="confirmRest">Rest</button>
-        </div>
-      `, {
-        confirmRest: async () => {
-          closeModal();
-          await executePlayerFirst(
-            "Rest for the Night",
-            async () => game.playerPilot.model.rest(actor, { skipDialog: true }),
-            "rest",
-            { actorId: actor.id, restType: "night" }
-          );
-        }
-      });
-      return;
-    }
-    await executePlayerFirst("Rest", async () => game.playerPilot.model.rest(actor), "rest", { actorId: actor.id, restType });
-    return;
-  }
-  const normalized = String(restType).toLowerCase() === "long" ? "long" : "short";
-  await executePlayerFirst(
-    `${normalized} rest`,
-    async () => {
-      if (normalized === "long" && typeof actor.longRest === "function") return actor.longRest({ dialog: true, chat: true });
-      if (normalized === "short" && typeof actor.shortRest === "function") return actor.shortRest({ dialog: true, chat: true });
-      throw new Error("Rest method not available locally.");
-    },
-    "rest",
-    { actorId: actor.id, restType: normalized }
-  );
-}
-
 function toggleTarget(tokenId) {
   const sceneId = state.scene?.id ?? "";
   const selected = selectedTargetSet(sceneId);
@@ -4589,7 +3933,7 @@ function targetIdsForCurrentUser() {
   return asArray(game.user?.targets).map((token) => String(token.id ?? token.document?.id ?? "")).filter(Boolean);
 }
 
-function applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
+export function applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
   const ids = Array.from(new Set((targetIds ?? []).map(String).filter(Boolean)));
   let applied = false;
   try {
@@ -4845,7 +4189,7 @@ function tokenCenterAt(tokenDoc, point, grid) {
   };
 }
 
-function movementResultLabel(result, dir = "") {
+function movementResultLabel(result, _dir = "") {
   if (!result?.moved) return "Move blocked";
   const amount = Math.round(Number(result.distanceFeet ?? 0) * 10) / 10;
   const units = result.units || state.scene?.gridUnits || "ft";
@@ -5093,51 +4437,6 @@ function drawRemoteMovementOverlay(data = {}) {
   remoteMovementOverlayTimers.set(tokenDoc.id, timer);
 }
 
-function drawMovementFeedback(tokenDoc, previous, target, distanceFeet) {
-  if (!canvas?.ready || !globalThis.PIXI) return;
-  const parent = canvas.controls ?? canvas.tokens ?? canvas.stage ?? null;
-  if (!parent) return;
-  const grid = Number(canvas?.grid?.size ?? state.scene?.gridSize ?? 100) || 100;
-  const from = tokenCenterAt(tokenDoc, previous, grid);
-  const to = tokenCenterAt(tokenDoc, target, grid);
-  try {
-    const overlay = new PIXI.Container();
-    overlay.name = `player-pilot-move-${tokenDoc.id}-${Date.now()}`;
-    overlay.eventMode = "none";
-    const graphics = new PIXI.Graphics();
-    graphics.lineStyle(5, 0x62c7b2, 0.95);
-    graphics.moveTo(from.x, from.y);
-    graphics.lineTo(to.x, to.y);
-    graphics.beginFill(0x62c7b2, 1);
-    graphics.drawCircle(from.x, from.y, 7);
-    graphics.drawCircle(to.x, to.y, 9);
-    graphics.endFill();
-    overlay.addChild(graphics);
-    const label = createPixiText(`${Math.round(Number(distanceFeet ?? 0) * 10) / 10} ${state.scene?.gridUnits ?? "ft"}`, {
-      fontFamily: "Signika, Arial",
-      fontSize: 24,
-      fontWeight: "700",
-      fill: 0xffffff,
-      stroke: 0x06231f,
-      strokeThickness: 4
-    });
-    label.anchor?.set?.(0.5);
-    label.position?.set?.((from.x + to.x) / 2, (from.y + to.y) / 2 - 20);
-    overlay.addChild(label);
-    parent.addChild(overlay);
-    window.setTimeout(() => {
-      try {
-        overlay.parent?.removeChild(overlay);
-        overlay.destroy({ children: true });
-      } catch (_err) {
-        // overlay already gone
-      }
-    }, 3200);
-  } catch (err) {
-    console.warn("Player Pilot movement overlay failed:", err);
-  }
-}
-
 function requestMapSnapshot() {
   const token = activeTokenForActor();
   if (!sendSocket("mapSnapshotRequest", {
@@ -5197,7 +4496,7 @@ function registerChatCapture() {
     if (content) addLog(content.slice(0, 60));
   });
 
-  Hooks.on("renderChatMessageHTML", (message, html, options) => {
+  Hooks.on("renderChatMessageHTML", (message, _html, _options) => {
     if (!userIsPilot()) return;
     // Close any popped out chat messages
     for (const app of Object.values(message.apps)) {
@@ -5465,8 +4764,8 @@ function actionNoticeType(item) {
 }
 
 function actionNoticeActivation(item, activityId = "") {
-  const selected = activityId ? selectedItemActivity(item, activityId)?.activity : null;
-  const activity = activitySystem(selected);
+  const selected = activityId ? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity : null;
+  const activity = game.playerPilot.model.activitySystem(selected);
   return fieldText(
     formatActionTime(activity?.activation ?? selected?.activation ?? {}),
     formatActionTime(item?.system?.activation ?? {}),
@@ -5484,7 +4783,7 @@ function actionNoticeTargets(data, item, actor) {
     .filter(Boolean);
   if (names.length) return names;
   if (targetIds.length) return [`${targetIds.length} target${targetIds.length === 1 ? "" : "s"}`];
-  const targetInfo = itemTargetInfo(item, data.options?.activityId);
+  const targetInfo = game.playerPilot.model.itemTargetInfo(item, data.options?.activityId);
   if (targetInfo.selfOnly) return [`${actor.name} (Self)`];
   return targetInfo.text ? [targetInfo.text] : [];
 }
@@ -5501,9 +4800,9 @@ function renderGmActionNotice({ requester, actor, item, data }) {
   const isSpell = item.type === "spell";
   const adapterId = game.playerPilot.model.id;
   const selectedLevel = Number(data.options?.castLevel ?? 0);
-  const baseLevel = adapterId === "pf2e" ? Number(pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
+  const baseLevel = adapterId === "pf2e" ? Number(game.playerPilot.model.pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
   const castLevel = selectedLevel > 0 ? selectedLevel : baseLevel;
-  const isCantrip = adapterId === "pf2e" ? pf2eIsCantrip(item) : baseLevel <= 0;
+  const isCantrip = adapterId === "pf2e" ? game.playerPilot.model.pf2eIsCantrip(item) : baseLevel <= 0;
   const levelText = isSpell ? (isCantrip ? "Cantrip" : String(castLevel)) : "";
   const levelLabel = adapterId === "pf2e" ? "Rank" : "Level";
   const targets = actionNoticeTargets(data, item, actor);
@@ -5588,7 +4887,7 @@ async function gmPf2eStrike(data) {
       at: Date.now()
     });
   }
-  await withProxyTargetsForUser(data.userId, () => PF2E_ADAPTER.executeStrike(actor, data));
+  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.executeStrike(actor, data));
 }
 
 async function gmPf2eItemRoll(data) {
@@ -5603,16 +4902,13 @@ async function gmPf2eItemRoll(data) {
       at: Date.now()
     });
   }
-  await withProxyTargetsForUser(data.userId, () => PF2E_ADAPTER.nativeItemRoll(actor, item, data.nativeAction, data));
+  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.nativeItemRoll(actor, item, data.nativeAction, data));
 }
 
-async function gmRest(data) {
+function gmRest(data) {
   const actor = gmActor(data.actorId);
   if (!actor) throw new Error("Actor not found.");
-  if (typeof game.playerPilot.model.rest === "function") return game.playerPilot.model.rest(actor);
-  if (data.restType === "long" && typeof actor.longRest === "function") return actor.longRest({ dialog: true, chat: true });
-  if (typeof actor.shortRest === "function") return actor.shortRest({ dialog: true, chat: true });
-  throw new Error("Rest method not available.");
+  return game.playerPilot.model.rest(actor, data);
 }
 
 async function gmUpdateActorData(data) {
@@ -6434,7 +5730,7 @@ function createSystemModel() {
   if (game.system.id == "dnd5e") {
     game.playerPilot.model = new DnD5eModel();
   } else if (game.system.id == "pf2e") {
-    //game.playerPilot.model = new PF2e();
+    game.playerPilot.model = new PF2eModel();
   } else if (game.system.id == "swade") {
     game.playerPilot.model = new SwadeModel();
   } else {

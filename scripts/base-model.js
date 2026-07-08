@@ -1,6 +1,13 @@
 import { renderInterfaceIcon, setting, state } from "./player-pilot.js";
-import { escapeHtml, htmlToPlain, itemDisplayName } from "./utils.js";
+import { escapeHtml, htmlToPlain, itemDisplayName, resolveNumericFormula } from "./utils.js";
 
+export const CURRENCY_LABELS = [
+  ["pp", "Platinum"],
+  ["gp", "Gold"],
+  ["ep", "Electrum"],
+  ["sp", "Silver"],
+  ["cp", "Copper"]
+];
 
 export class BaseModel {
 
@@ -88,8 +95,8 @@ export class BaseModel {
     const actor = this.actor;
     const actorStamp = actor._stats?.modifiedTime ?? actor._source?._stats?.modifiedTime ?? actor._source?._stats?.lastModifiedTime ?? "";
     const itemStamps =
-    actor.items.map((item) => `${item.id}:${item._stats?.modifiedTime ?? item._source?._stats?.modifiedTime ?? item._source?._stats?.lastModifiedTime ?? ""}`)
-      .join("|");
+      actor.items.map((item) => `${item.id}:${item._stats?.modifiedTime ?? item._source?._stats?.modifiedTime ?? item._source?._stats?.lastModifiedTime ?? ""}`)
+        .join("|");
     const effectsFingerprint = `${Array.from(actor.statuses).join(",")}:${(actor.effects).map((e) => `${e.id}:${e.img}`)}`;
 
     return `${actor.id}:${actorStamp}:${itemStamps}:${effectsFingerprint}`;
@@ -120,8 +127,10 @@ export class BaseModel {
   }
 
   refreshInventoryGroups(items) {
+    const filteredItems = items.filter(this.isInventoryItem);
+
     const groups = new Map();
-    for (const item of items) {
+    for (const item of filteredItems) {
       const key = item.containerName || (item.type === "backpack" ? item.name : "Carried");
       if (!groups.has(key)) {
         groups.set(key, {
@@ -165,11 +174,11 @@ export class BaseModel {
     };
   }
 
-  itemIsEquippable(item) {
+  itemIsEquippable(_item) {
     return false;
   }
 
-  itemIsEquipped(item) {
+  itemIsEquipped(_item) {
     return false;
   }
 
@@ -177,11 +186,11 @@ export class BaseModel {
     return !!item;
   }
 
-  itemNeedsAmmo(item) {
+  itemNeedsAmmo(_item) {
     return false;
   }
 
-  itemTargetInfo(item, activityId = "") {
+  itemTargetInfo(_item, _activityId = "") {
     return {
       count: 0,
       needsTarget: false,
@@ -198,11 +207,11 @@ export class BaseModel {
     return badges.slice(0, 4);
   }
 
-  isInventoryItem(item) {
-    return false;
+  isInventoryItem(_item) {
+    return true;
   }
 
-  itemBelongsInActions(item) {
+  itemBelongsInActions(_item) {
     return false;
   }
 
@@ -260,7 +269,7 @@ export class BaseModel {
     return filters.some((filter) => this.matchesOneQuickFilter(key, filter, item));
   }
 
-  matchesOneQuickFilter(key, filter, item) {
+  matchesOneQuickFilter(_key, filter, item) {
     if (filter === "quantity") return item.quantity !== null;
     return item.type === filter || item.group === filter;
   }
@@ -269,7 +278,7 @@ export class BaseModel {
     return true;
   }
 
-  async useItem(actor, item, options = {}) {
+  async useItem(_actor, _item, _options = {}) {
   }
 
   abilityDisplayIcon(key) {
@@ -290,15 +299,19 @@ export class BaseModel {
     })[String(key ?? "").toLowerCase()] ?? "fa-circle";
   }
 
-  spellSlotChoices(item) {
+  spellSlotChoices(_item) {
     return [];
   }
 
-  concentrationWarning(item) {
+  spellPreparationSummary(_normalizedSpells = []) {
+    return null;
+  }
+
+  concentrationWarning(_item) {
     return "";
   }
 
-  ammoChoices(item) {
+  ammoChoices(_item) {
     return [];
   }
 
@@ -307,5 +320,37 @@ export class BaseModel {
       speaker: ChatMessage.getSpeaker({ actor: this.actor }),
       content: `<p><strong>${escapeHtml(this.actor.name)}</strong> requested ${escapeHtml(kind)} ${escapeHtml(key)}.</p>`
     });
+  }
+
+  restRecoveryLabel(_value) {
+    return "";
+  }
+
+  itemUsesText(item) {
+    const system = item?.system ?? {};
+    const uses = system.uses;
+    if (!uses || typeof uses !== "object") return "";
+    const spent = Number(uses.spent ?? NaN);
+    const max = resolveNumericFormula(uses.max, item);
+    const explicitValue = Number(uses.value ?? NaN);
+    const value = Number.isFinite(explicitValue)
+      ? explicitValue
+      : (Number.isFinite(max) && Number.isFinite(spent) ? Math.max(0, max - spent) : NaN);
+    const recovery = this.restRecoveryLabel(
+      uses.per
+      ?? uses.recovery?.period
+      ?? uses.recovery?.[0]?.period
+      ?? uses.recovery?.find?.((entry) => entry?.period)?.period
+      ?? ""
+    );
+    if (Number.isFinite(max) && max > 0) {
+      const base = `Uses Available ${Number.isFinite(value) ? value : max} / ${max}`;
+      return `${base}${recovery ? `, resets on ${recovery}` : ""}`;
+    }
+    if (Number.isFinite(value) && value > 0) {
+      const base = `Uses Available ${value}`;
+      return `${base}${recovery ? `, resets on ${recovery}` : ""}`;
+    }
+    return "";
   }
 }
