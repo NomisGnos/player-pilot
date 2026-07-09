@@ -1,5 +1,10 @@
 <main class="pp-body">
-    <section class="pp-view pp-stats-page pp-system-{{model.adapter.id}} tab {{#if (eq activeTab.key 'spells')}}active{{/if}}" data-tab="spells">
-        {{{renderSpellsView model}}}
+    <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'spells')}}active{{/if}}" data-tab="spells">
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search spells..."}}
+        {{{renderQuickFilters "spells"}}}
+        <div class="pp-section">
+            {{{renderSectionHeader "Spells" "fa-wand-magic-sparkles" (filteredItemCount "spells" model.groups.spells)}}}
+            {{{renderSpellLevelSections (filterItemsForView "spells" model.groups.spells) model.groups.spellSlots (spellPreparationSummary model)}}}
+        </div>
     </section>
 </main>

@@ -1,7 +1,7 @@
 <main class="pp-body">
   <section class="pp-view pp-stats-page pp-system-dnd5e tab {{#if (eq activeTab.key 'stats')}}active{{/if}}" data-tab="stats">
     <div class="pp-section">
-      {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.adapter.label}}
+      {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.label}}
 
       {{!-- HP Bar --}}
       <div class="pp-hp-panel pp-compact-card">

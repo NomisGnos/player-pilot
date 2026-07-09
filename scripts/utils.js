@@ -191,6 +191,10 @@ export function readableReferenceLabel(raw) {
   return cleaned;
 }
 
+export function itemDisplayName(item) {
+  return cleanRulesText(item?.name ?? "Item") || "Item";
+}
+
 export function cleanFoundrySyntax(value) {
   return String(value ?? "")
     .replace(/\[\[(?:\/[a-z]+\s+)?([^\]]+)\]\]/gi, (_m, formula) => String(formula ?? "").replace(/\s+#.*$/, "").trim())
@@ -204,6 +208,12 @@ export function cleanRulesText(value) {
     .trim();
 }
 
+export function normalizedFormula(formula) {
+  return String(formula ?? "").toLowerCase().replace(/\s+/g, "");
+}
+
+//Applies missing data from baseTabs into overrideTabs
+//Does not add any new tabs to override
 export function mergeTabs(baseTabs, overrideTabs) {
   const baseMap = new Map(baseTabs.map(t => [t.key, foundry.utils.deepClone(t)]));
   return overrideTabs.map(override => {

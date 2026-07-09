@@ -24,7 +24,7 @@ export default [
                 // Canvas / rendering
                 canvas: "readonly",
                 PIXI: "readonly",
-				Roll: "readonly",
+                Roll: "readonly",
 
                 // Documents
                 Actor: "readonly",
@@ -47,7 +47,11 @@ export default [
 
         rules: {
             "no-undef": "error",
-			"no-unused-vars": "off"
+            "no-unused-vars": ["error", {
+                argsIgnorePattern: "^_",
+                destructuredArrayIgnorePattern: "^_",
+                caughtErrors: "none"
+            }]
         },
     },
 ];
