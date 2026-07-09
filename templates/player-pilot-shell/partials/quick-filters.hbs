@@ -1,0 +1,9 @@
+<div class="pp-filter-funnel-row">
+    <span><i class="fas fa-sack-xmark"></i> Inventory</span>
+
+    {{renderFilterMenuButton "inventory" ["inventory"] "Inventory filters"}}
+    <div class="pp-action-filter-popover ${state.filterMenuOpen === " inventory" ? "open" : "" }">
+        <strong>Inventory Filters</strong>
+        {{renderQuickFilters "inventory"}}
+    </div>
+</div>

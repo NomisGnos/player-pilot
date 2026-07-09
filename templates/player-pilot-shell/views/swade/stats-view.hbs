@@ -1,0 +1,75 @@
+<main class="pp-body">
+  <section class="pp-view pp-stats-page pp-system-swade tab {{#if (eq activeTab.key 'stats')}}active{{/if}}" data-tab="stats">
+    <div class="pp-section">
+      {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.label}}
+
+      {{!-- Wounds and Fatigue --}}
+      <div class="pp-wounds-panel">
+        {{#if summary.fatigue.max}}
+          <div class="pp-hp-panel pp-fatigue pp-compact-card">
+            <div class="pp-hp-copy">
+              <span><i class="fas fa-face-hand-yawn"></i> Fatigue</span>
+              <strong>{{summary.fatigue.display}}</strong>
+            </div>
+            <div class="pp-hp-track" aria-label="Hit points">
+              <div class="pp-hp-fill" style="width:{{summary.fatigue.pct}}%"></div>
+            </div>
+          </div>
+        {{/if}}
+        {{#if summary.wounds.max}}
+          <div class="pp-hp-panel pp-compact-card">
+            <div class="pp-hp-copy">
+              <span><i class="fas fa-heart-pulse"></i> Wounds</span>
+              <strong>{{summary.wounds.display}}</strong>
+            </div>
+            <div class="pp-hp-track" aria-label="Hit points">
+              <div class="pp-hp-fill" style="width:{{summary.wounds.pct}}%"></div>
+            </div>
+          </div>
+        {{/if}}
+      </div>
+
+      <div class="pp-statuses-grid">
+        {{#each summary.statuses}}
+          <label class="">
+            <input type="checkbox" data-action="toggleStatusEffect" data-id="{{@key}}" {{#if this.value}}checked{{/if}}>
+            {{this.label}}
+          </label>
+        {{/each}}
+      </div>
+
+      <div class="pp-status-grid">
+        {{#each statCards}}
+          {{>"modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs" this}}
+        {{/each}}
+      </div>
+
+      <div class="pp-detail-strips">
+        {{#each summary.powerPoints}}
+          <div class="pp-detail-strip pp-pp-strip">
+            <i class="fas fa-sparkles"></i>
+            {{#if (eq ../summary.powerPoints.length 1)}}
+              <span>Power Points</span>
+            {{else}}
+              <span>{{name}} PP</span>
+            {{/if}}
+            <button type="button" data-action="powerPoints" data-arcane="{{key}}" data-delta="-1" title="Spend PP"><i class="fas fa-minus"></i></button>
+            <strong>{{value}} / {{max}}</strong>
+            <button type="button" data-action="powerPoints" data-arcane="{{key}}" data-delta="1" title="Gain PP"><i class="fas fa-plus"></i></button>
+          </div>
+        {{/each}}
+      </div>
+
+      <div class="pp-swade-attribute-grid">
+        {{#each summary.attributes}}
+          <div class="pp-swade-attribute">
+            <span class="pp-ability-label">{{label}}</span>
+            <button class="pp-roll-skill-btn" type="button" data-action="swadeRoll" data-kind="attribute" data-trait-id="{{key}}" title="Roll {{label}}">
+              <div class="pp-swade-die-group">{{{die}}}<span>{{mod}}</span></div>
+            </button>
+          </div>
+        {{/each}}
+      </div>
+    </div>
+  </section>
+</main>

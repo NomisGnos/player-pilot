@@ -1,0 +1,32 @@
+<main class="pp-body">
+  <section class="pp-view pp-stats-page pp-system-swade tab {{#if (eq activeTab.key 'powers')}}active{{/if}}" data-tab="powers">
+    {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search powers..."}}
+
+    {{#if (gt model.groups.powers.filters.length 2)}}
+      <div class="pp-filter-row" aria-label="Quick filters">
+        {{#each model.groups.powers.filters as |filter|}}
+          <button class="pp-chip {{#if (isQuickFilterActive filter.key)}}active{{/if}}" type="button" data-action="quickFilter" data-filter-key="powers" data-filter="{{filter.key}}" data-multi="false" aria-pressed="{{#if (isQuickFilterActive filter.key)}}true{{else}}false{{/if}}">
+            {{#if filter.icon}}<i class="fas {{filter.icon}}"></i>{{/if}}
+            {{filter.label}}
+          </button>
+        {{/each}}
+      </div>
+    {{/if}}
+
+    <div class="pp-section">
+      {{#each (filterItemsForView "powers" model.groups.powers.groups)}}
+        <div class="pp-subsection">
+          <div class="pp-section-header pp-big-header pp-combined-header">
+            <h2><i class="fas fa-sack-xmark"></i><span>{{arcane}}</span></h2>
+            <span class="pp-header-count">{{powers.length}}</span>
+          </div>
+
+          <div class="pp-card-list">
+            {{#each (filterItemsForView "powers" powers) as |power|}}
+              {{{renderItemCard power}}}
+            {{/each}}
+          </div>
+      {{/each}}
+    </div>
+  </section>
+</main>

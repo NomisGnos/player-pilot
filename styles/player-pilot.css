@@ -499,15 +499,20 @@ body.player-pilot-active #pause {
   box-shadow: inset 3px 0 0 var(--pp-danger);
 }
 
-.pp-stat.ac {
+.pp-stat.ac,
+.pp-stat.parry,
+.pp-stat.toughness {
   box-shadow: inset 3px 0 0 var(--pp-warn);
 }
 
-.pp-stat.speed {
+.pp-stat.speed,
+.pp-stat.pace {
   box-shadow: inset 3px 0 0 var(--pp-accent);
 }
 
 .pp-stat.level,
+.pp-stat.rank,
+.pp-stat.bennies,
 .pp-stat.prof {
   box-shadow: inset 3px 0 0 var(--pp-good);
 }
@@ -1464,10 +1469,16 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   display: grid;
   gap: 7px;
   min-width: 0;
+  flex: 100%;
   padding: 10px;
   border: 1px solid rgba(229, 107, 101, 0.32);
   border-radius: var(--pp-radius);
   background: linear-gradient(180deg, #20272e, #14191f);
+}
+
+.pp-hp-panel.pp-fatigue {
+  background: linear-gradient(180deg, #2b2b1b, #161612);
+  border-color: rgba(225, 229, 101, 0.55);
 }
 
 .pp-hp-copy {
@@ -1540,6 +1551,27 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   right: 0;
   background: rgba(72, 166, 255, 0.92);
   border-radius: 999px;
+}
+
+.pp-wounds-panel {
+  display: flex;
+  gap: 7px;
+}
+
+.pp-statuses-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  color: var(--pp-text);
+  background: #151d24;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.pp-bennies-controls {
+  display: flex;
+  gap: 7px;
 }
 
 .pp-stat-toggle {
@@ -1895,6 +1927,35 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   color: var(--pp-accent);
   font-style: normal;
   font-weight: 900;
+}
+
+.pp-swade-attribute-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0 12px 10px;
+}
+
+.pp-swade-attribute {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 7px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--pp-radius);
+  background: #111820;
+}
+
+.pp-swade-die-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+}
+
+.pp-swade-die {
+  height: 50px;
+  min-width: stretch;
 }
 
 .pp-spell-section {
@@ -2904,6 +2965,42 @@ button.pp-card-img.pp-card-info-btn {
   outline-offset: 1px;
 }
 
+.pp-swade-skill-card {
+  grid-template-columns: 42px minmax(0, 2fr) 1fr;
+  align-items: start;
+}
+
+.pp-swade-skill-card img {
+  align-self: center;
+}
+
+.pp-swade-skill-card .pp-card-title {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.pp-swade-skill-card .pp-card-title hr {
+  margin: 0;
+  background-image: linear-gradient(90deg, transparent 0%, var(--pp-text) 50%, transparent 100%);
+  color: 1px solid var(--pp-text);
+}
+
+.pp-linked-attribute {
+  font-style: italic;
+}
+
+.pp-roll-skill-btn {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.5rem;
+  color: var(--pp-text);
+}
+
 .pp-cast-level-static,
 .pp-cast-preview {
   display: grid;
@@ -3901,7 +3998,8 @@ button.pp-card-img.pp-card-info-btn {
   border-color: rgba(229, 107, 101, 0.5);
 }
 
-.pp-exhaustion-strip {
+.pp-exhaustion-strip
+.pp-pp-strip {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 }
 
@@ -5246,6 +5344,10 @@ body.player-pilot-active #notifications > .notification.error {
 
 .pp-topbar {
   align-items: stretch !important;
+}
+
+.pp-topbar.pp-no-actor {
+  display: flex;
 }
 
 .pp-identity-block,
