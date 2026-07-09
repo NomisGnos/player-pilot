@@ -3,6 +3,7 @@
 [![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v13--v14.363-orange?style=for-the-badge)](https://foundryvtt.com/)
 [![D&D5e](https://img.shields.io/badge/D%26D5e-native-red?style=for-the-badge)](https://foundryvtt.com/packages/dnd5e)
 [![PF2e](https://img.shields.io/badge/PF2e-native-blue?style=for-the-badge)](https://foundryvtt.com/packages/pf2e)
+[![SWADE](https://img.shields.io/badge/SWADE-native-blue?style=for-the-badge)](https://foundryvtt.com/packages/swade)
 [![Patreon](https://img.shields.io/badge/Patreon-drop%20a%20goodberry-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/nomisDM)
 
 Player Pilot is a mobile-first character control module for Foundry VTT.
