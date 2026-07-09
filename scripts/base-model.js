@@ -301,6 +301,10 @@ export class BaseModel {
     })[String(key ?? "").toLowerCase()] ?? "fa-circle";
   }
 
+  spellDetailRows(_item) {
+    return [];
+  }
+
   spellSlotChoices(_item) {
     return [];
   }
