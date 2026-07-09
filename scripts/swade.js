@@ -376,14 +376,19 @@ export class SwadeModel extends BaseModel {
 
   itemIsEquippable(item) {
     if (!item) return false;
-    if (!this.isInventoryItem(item)) return false;
-    return !!item.system.equippable;
+    if (item.type === "weapon" || item.type === "armor" || item.type === "shield") return true;
+    if (item.type === "gear") return item.system.equippable;
+    return false;
   }
 
   itemIsEquipped(item) {
     if (!this.itemIsEquippable(item)) return false;
-    return item.system.equipStatus != SwadeModel.SWADE_EQUIP_STATE.CARRIED &&
-      item.system.equipStatus != SwadeModel.SWADE_EQUIP_STATE.STORED;
+    return [
+      SwadeModel.SWADE_EQUIP_STATE.MAIN_HAND,
+      SwadeModel.SWADE_EQUIP_STATE.OFF_HAND,
+      SwadeModel.SWADE_EQUIP_STATE.TWO_HANDS,
+      SwadeModel.SWADE_EQUIP_STATE.EQUIPPED,
+    ].includes(item.system.equipStatus);
   }
 
   itemCanBeUsed(item) {
@@ -526,7 +531,7 @@ export class SwadeModel extends BaseModel {
         },
       );
 
-    } else {
+    } else if (this.itemIsEquippable(item)) {
       choices.push(
         {
           equipStatus: SwadeModel.SWADE_EQUIP_STATE.EQUIPPED,
@@ -590,9 +595,7 @@ export class SwadeModel extends BaseModel {
     const actor = this.actor;
     const item = actor?.items.get(itemId);
     if (!actor || !item) return;
-
-    const equippable = this.itemIsEquippable(item);
-    if (!equippable) return;
+    if (!this.isInventoryItem(item)) return;
     this.openEquipStatusDialog(actor, item);
   }
 
@@ -622,7 +625,7 @@ export class SwadeModel extends BaseModel {
   }
 
   equipButton(item) {
-    if (!item.equippable) return "";
+    if (!this.isInventoryItem(item)) return "";
     const equipLabel = SwadeModel.SWADE_EQUIP_STATE_LABELS[item.equipStatus];
     const equipIcon = SwadeModel.SWADE_EQUIP_STATE_ICONS[item.equipStatus];
     return `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${item.id}"
