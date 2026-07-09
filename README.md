@@ -149,6 +149,10 @@ Please visit my Patreon and drop me a goodberry:
 https://www.patreon.com/cw/nomisDM
 ```
 
+## Credits
+
+Special thanks to [ddbrown30](https://github.com/ddbrown30) for contributing the system interface rework and SWADE support.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
