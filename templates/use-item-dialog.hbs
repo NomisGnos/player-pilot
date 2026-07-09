@@ -1,0 +1,90 @@
+<div class="pp-dialog">
+    <h2>Use {{itemName}}</h2>
+
+    <div class="pp-use-step {{#unless activityStep}}hidden{{/unless}}" data-use-step="activity">
+        <div class="pp-activity-choice-hero">
+            <i class="fas fa-list-check"></i>
+            <div>
+                <strong>Choose how to use this action</strong>
+                <span>{{#if playerChoice}}{{playerChoice.prompt}}{{else}}Select the exact activity before continuing.{{/if}}</span>
+            </div>
+        </div>
+        {{#if showActivitySelect}}
+            <label>Activity</label>
+            <select class="pp-select" name="activityId">
+                {{#each activities as |activity|}}
+                    <option value="{{activity.id}}">{{activity.name}}</option>
+                {{/each}}
+            </select>
+        {{/if}}
+        {{#if playerChoice}}
+            <label>{{playerChoice.label}}</label>
+            <select class="pp-select" name="playerChoice">
+                {{#each playerChoice.options as |choice|}}
+                    <option value="{{choice.value}}">{{choice.label}}</option>
+                {{/each}}
+            </select>
+        {{/if}}
+    </div>
+
+    <div class="pp-use-step {{#if activityStep}}hidden{{else}}{{#unless targetStep}}hidden{{/unless}}{{/if}}" data-use-step="targets">
+        <p data-modal-target-summary>{{targetInstruction}}</p>
+        <div data-modal-target-picker>{{{targetPickerHtml}}}</div>
+    </div>
+
+    <div class="pp-use-step {{#if activityStep}}hidden{{else}}{{#if targetStep}}hidden{{else}}{{#unless spellStep}}hidden{{/unless}}{{/if}}{{/if}}" data-use-step="cast">
+        {{#if concentration}}<p><strong>{{concentration}}</strong></p>{{/if}}
+        {{#if slots}}
+            <label>{{#if isPf2e}}Cast Rank{{else}}Cast Level{{/if}}</label>
+            <select class="pp-select" name="castLevel">
+                {{#each slots as |slot|}}
+                    <option value="{{slot.level}}">{{slot.label}}</option>
+                {{/each}}
+            </select>
+        {{else}}
+            <div class="pp-cast-level-static">
+                <i class="fas fa-wand-magic-sparkles"></i>
+                <strong>{{staticCastLabel}}</strong>
+            </div>
+        {{/if}}
+        <div class="pp-cast-preview" data-cast-preview>{{{castPreviewHtml}}}</div>
+        {{#if ammo}}
+            <label>Ammo</label>
+            <select class="pp-select" name="ammoItemId">
+                <option value="">Default</option>
+                {{#each ammo as |entry|}}
+                    <option value="{{entry.id}}">{{entry.label}}</option>
+                {{/each}}
+            </select>
+        {{/if}}
+    </div>
+
+    <div class="pp-use-step {{#unless initialRolls}}hidden{{/unless}}" data-use-step="rolls">
+        {{#if concentration}}<p><strong>{{concentration}}</strong></p>{{/if}}
+        <div class="pp-rolls-required-heading">
+            <i class="fas fa-list-check"></i>
+            <div>
+                <strong data-rolls-heading-title>Rolls Still Required</strong>
+                <span data-rolls-heading-detail>Complete each applicable attack, save, damage, healing, or system roll step below.</span>
+            </div>
+        </div>
+        <div class="pp-placement-prompt hidden" data-placement-prompt>
+            <i class="fas fa-map-location-dot"></i>
+            <div>
+                <strong>Placement needed</strong>
+                <span>Use Ping On Map so the GM can place the template, teleport, or chosen point.</span>
+            </div>
+        </div>
+        {{#if sneakAttackHtml}}<div data-sneak-attack-control>{{{sneakAttackHtml}}}</div>{{/if}}
+        <div data-roll-instructions>{{{rollInstructionsHtml}}}</div>
+    </div>
+
+    <div class="pp-dialog-actions">
+        <button class="pp-button" type="button" data-action="close">Cancel</button>
+        <button class="pp-button primary {{#unless activityStep}}hidden{{/unless}}" type="button" data-action="nextActivityStep">Next</button>
+        <button class="pp-button primary {{#if activityStep}}hidden{{else}}{{#unless targetStep}}hidden{{/unless}}{{/if}}" type="button" data-action="nextTargetStep">Next</button>
+        <button class="pp-button primary {{#if activityStep}}hidden{{else}}{{#if targetStep}}hidden{{else}}{{#unless spellStep}}hidden{{/unless}}{{/if}}{{/if}}" type="button" data-action="castSpell">{{castButtonLabel}}</button>
+        <button class="pp-button primary {{#unless initialRolls}}hidden{{/unless}}" type="button" data-action="use">Next</button>
+        <button class="pp-button primary hidden" type="button" data-action="close" data-final-done>Done</button>
+    </div>
+</div>

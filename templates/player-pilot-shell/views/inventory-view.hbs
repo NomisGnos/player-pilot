@@ -12,20 +12,6 @@
             </div>
         </div>
 
-        {{#each model.groups.inventory}}
-            <div class="pp-subsection">
-                <div class="pp-section-header pp-big-header pp-combined-header">
-                    <h2><i class="fas fa-sack-xmark"></i><span>Inventory</span><b>-</b><i class="{{this.icon}}"></i><span>{{this.name}}</span></h2>
-                    <span class="pp-header-count">{{this.count}}</span>
-                </div>
-                <div class="pp-card-list">
-                    {{#each (filterItemsForView "inventory" this.items) as |item|}}
-                        {{{renderItemCard item}}}
-                    {{/each}}
-                </div>
-            </div>
-        {{/each}}
-
         {{#if model.groups.currency}}
             <div class="pp-currency">
                 <div class="pp-subtitle">Currency</div>
@@ -43,5 +29,20 @@
                 </div>
             </div>
         {{/if}}
+
+        {{#each model.groups.inventory}}
+            <div class="pp-subsection">
+                <div class="pp-section-header pp-big-header pp-combined-header">
+                    <h2><i class="fas fa-sack-xmark"></i><span>Inventory</span><b>-</b><i class="{{this.icon}}"></i><span>{{this.name}}</span></h2>
+                    <span class="pp-header-count">{{this.count}}</span>
+                </div>
+                <div class="pp-card-list">
+                    {{#each (filterItemsForView "inventory" this.items) as |item|}}
+                        {{{renderItemCard item}}}
+                    {{/each}}
+                </div>
+            </div>
+        {{/each}}
+
     </section>
 </main>

@@ -276,8 +276,8 @@ export class BaseModel {
     return item.type === filter || item.group === filter;
   }
 
-  canUseItem() {
-    return true;
+  canUseItem(item) {
+    return this.itemCanBeUsed(item);
   }
 
   async useItem(_actor, _item, _options = {}) {
@@ -377,7 +377,7 @@ export class BaseModel {
     if (!actor || !currency) return;
     openModal(`
       <h2>${escapeHtml(currency.label)}</h2>
-      <p>Current amount: ${escapeHtml(currency.current)}</p>
+      <p>Current amount: ${escapeHtml(currency.value)}</p>
       <label>Change</label>
       <select class="pp-select" name="currencyMode">
         <option value="add">Add</option>

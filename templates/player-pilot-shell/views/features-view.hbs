@@ -1,5 +1,16 @@
 <main class="pp-body">
     <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'features')}}active{{/if}}" data-tab="features">
-        {{{renderFeaturesView model}}}
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search features..."}}
+        <div class="pp-filter-funnel-row">
+            <span><i class="fas fa-star"></i> Features</span>
+            {{{renderFilterMenuButton "features" "features" "Feature filters"}}}
+            <div class="pp-action-filter-popover {{#if (eq state.filterMenuOpen 'features')}}open{{/if}}">
+                <strong>Feature Filters</strong>
+                {{{renderQuickFilters "features"}}}
+            </div>
+        </div>
+        <div class="pp-section">
+            {{{renderFeatureGroups (filterItemsForView "features" model.groups.features)}}}
+        </div>
     </section>
 </main>

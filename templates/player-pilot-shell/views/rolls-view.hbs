@@ -1,5 +1,9 @@
 <main class="pp-body">
     <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'rolls')}}active{{/if}}" data-tab="rolls">
-        {{{renderRollsView model}}}
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search rolls..."}}
+        <div class="pp-section">
+            {{{renderSectionHeader "Rolls" "pp-die-d20" model.label}}}
+            {{{renderCheckGroups model.groups.checks}}}
+        </div>
     </section>
 </main>

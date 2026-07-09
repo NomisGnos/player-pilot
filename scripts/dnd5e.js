@@ -681,7 +681,7 @@ export class DnD5eModel extends BaseModel {
         useOptions.ammo = options.ammoItemId;
       }
       if (options.replaceConcentrationEffectId) {
-        await this.endActorConcentration(actor, options.replaceConcentrationEffectId);
+        await this.endActorConcentration(options.replaceConcentrationEffectId);
         useOptions.concentration = {
           begin: true,
           end: String(options.replaceConcentrationEffectId)

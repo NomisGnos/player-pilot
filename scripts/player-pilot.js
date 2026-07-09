@@ -3,6 +3,7 @@ import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
 import { PF2eModel } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
 import { SwadeModel } from "./swade.js";
+import { UseItemDialog } from "./use-item-dialog.js";
 import {
   asArray,
   capitalizeWords,
@@ -461,6 +462,7 @@ export const state = {
     timer: null
   },
   modal: null,
+  modalApp: null,
   sharedImage: null,
   log: [],
   renderQueued: false,
@@ -1116,11 +1118,12 @@ async function registerHandlebarsHelpers() {
   Handlebars.registerHelper({
     renderDieGlyph,
     renderInterfaceIcon,
-    renderActionsView,
-    renderRollsView,
-    renderSpellsView,
-    renderFeaturesView,
     renderMapView,
+    renderActionGroup,
+    renderCheckGroups,
+    renderFeatureGroups,
+    renderSpellLevelSections,
+    renderSectionHeader,
     renderSmartBadge,
     renderBadge,
     filterItemsForView,
@@ -1130,6 +1133,22 @@ async function registerHandlebarsHelpers() {
 
   Handlebars.registerHelper("renderItemCard", function (item, options) {
     return renderItemCard(item, options.hash);
+  });
+
+  Handlebars.registerHelper("spellPreparationSummary", function (model) {
+    return model.spellPreparationSummary(model.groups.spells ?? []);
+  });
+
+  Handlebars.registerHelper("renderActionFilterMenuButton", function () {
+    return renderFilterMenuButton(
+      "actions",
+      ["actionTiming", "actionSpellTraits"],
+      "More action filters"
+    );
+  });
+
+  Handlebars.registerHelper("filteredItemCount", function (key, items) {
+    return filterItemsForView(key, items ?? []).length;
   });
 
   Handlebars.registerHelper("isQuickFilterActive", function (filter, options) {
@@ -1592,89 +1611,6 @@ function renderFilterMenuButton(menu, keys, label = "Filters") {
       <i class="fas fa-filter"></i>
       ${count ? `<span class="pp-filter-count">${escapeHtml(count)}</span>` : ""}
     </button>
-  `;
-}
-
-function renderActionsView(model) {
-  const groups = model.groups.actionGroups ?? { action: model.groups.actions ?? [] };
-  const content = model.id === "pf2e"
-    ? [
-      ["One Action", groups.action1],
-      ["Two Actions", groups.action2],
-      ["Three Actions", groups.action3],
-      ["Reactions", groups.reaction],
-      ["Free Actions", groups.free],
-      ["Passive", groups.passive],
-      ["Other", groups.other]
-    ].map(([title, items]) => renderActionGroup(title, items, model.id)).join("")
-    : `
-      ${renderActionGroup("Actions", groups.action)}
-      ${renderActionGroup("Bonus Actions", groups.bonus)}
-      ${renderActionGroup("Reactions", groups.reaction)}
-      ${renderActionGroup("Passive / At Will", groups.passive)}
-      ${renderActionGroup("Other", groups.other)}
-    `;
-  return `
-    <section class="pp-view active">
-      ${renderSearchInput("Search actions, spells, items...")}
-      <div class="pp-action-filter-tools">
-        ${renderQuickFilters("actions")}
-        ${renderFilterMenuButton("actions", ["actionTiming", "actionSpellTraits"], "More action filters")}
-        <div class="pp-action-filter-popover ${state.filterMenuOpen === "actions" ? "open" : ""}">
-          <strong>Action Type</strong>
-          ${renderQuickFilters("actionTiming")}
-          ${quickFilterFor("actions") === "spell" ? `<strong>Spell Traits</strong>${renderQuickFilters("actionSpellTraits")}` : ""}
-        </div>
-      </div>
-      ${content}
-    </section>
-  `;
-}
-
-function renderRollsView(model) {
-  return `
-    <section class="pp-view active">
-      ${renderSearchInput("Search rolls...")}
-      <div class="pp-section">
-        ${renderSectionHeader("Rolls", "pp-die-d20", model.label)}
-        ${renderCheckGroups(model.groups.checks ?? [])}
-      </div>
-    </section>
-  `;
-}
-
-function renderFeaturesView(model) {
-  const filtered = filterItemsForView("features", model.groups.features ?? []);
-  return `
-    <section class="pp-view active">
-      ${renderSearchInput("Search features...")}
-      <div class="pp-filter-funnel-row">
-        <span><i class="fas fa-star"></i> Features</span>
-        ${renderFilterMenuButton("features", ["features"], "Feature filters")}
-        <div class="pp-action-filter-popover ${state.filterMenuOpen === "features" ? "open" : ""}">
-          <strong>Feature Filters</strong>
-          ${renderQuickFilters("features")}
-        </div>
-      </div>
-      <div class="pp-section">
-        ${renderFeatureGroups(filtered)}
-      </div>
-    </section>
-  `;
-}
-
-function renderSpellsView(model) {
-  const filtered = filterItemsForView("spells", model.groups.spells ?? []);
-  const preparation = model.spellPreparationSummary(model.groups.spells ?? []);
-  return `
-    <section class="pp-view active">
-      ${renderSearchInput("Search spells...")}
-      ${renderQuickFilters("spells")}
-      <div class="pp-section">
-        ${renderSectionHeader("Spells", "fa-wand-magic-sparkles", filtered.length)}
-        ${renderSpellLevelSections(filtered, model.groups.spellSlots ?? [], preparation)}
-      </div>
-    </section>
   `;
 }
 
@@ -2608,6 +2544,9 @@ export function openModal(content, handlers = {}) {
 }
 
 export function closeModal() {
+  const modalApp = state.modalApp;
+  state.modalApp = null;
+  if (modalApp) modalApp.close({ animate: false });
   state.modal?.remove();
   state.modal = null;
   document.body.classList.remove("player-pilot-modal-open");
@@ -2638,6 +2577,30 @@ async function openItemInfoDialog(itemId) {
   });
 }
 
+function openConcentrationBreakDialog(itemId, item, effect) {
+  const currentName = game.playerPilot.model.concentrationEffectLabel(effect);
+  openModal(`
+    <h2>Break Concentration First</h2>
+    <div class="pp-concentration-gate">
+      <i class="fas fa-brain"></i>
+      <div>
+        <span>Currently concentrating on</span>
+        <strong>${escapeHtml(currentName)}</strong>
+      </div>
+    </div>
+    <p><strong>${escapeHtml(itemDisplayName(item))}</strong> also requires concentration. End ${escapeHtml(currentName)} before continuing with this use?</p>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+      <button class="pp-button primary" type="button" data-modal-action="replaceConcentration">Break &amp; Continue</button>
+    </div>
+  `, {
+    replaceConcentration: async () => {
+      closeModal();
+      openUseDialog(itemId, { approvedConcentrationId: String(effect.id ?? "") });
+    }
+  });
+}
+
 function openUseDialog(itemId, flowOptions = {}) {
   if (pilotPaused()) {
     warnPaused();
@@ -2647,7 +2610,7 @@ function openUseDialog(itemId, flowOptions = {}) {
   const item = findItem(itemId);
   if (!actor || !item) return;
   const model = game.playerPilot.model;
-  const canUseItem = model.canUseItem(actor, item) ?? model.itemCanBeUsed(item);
+  const canUseItem = model.canUseItem(item);
   if (!canUseItem) {
     const message = model.id === "pf2e" && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
@@ -2659,23 +2622,102 @@ function openUseDialog(itemId, flowOptions = {}) {
     ? model.actorConcentrationEffects(actor)[0] ?? null
     : null;
   if (activeConcentration && String(activeConcentration.id ?? "") !== String(flowOptions.approvedConcentrationId ?? "")) {
-    model.openConcentrationBreakDialog(itemId, actor, item, activeConcentration);
+    openConcentrationBreakDialog(itemId, item, activeConcentration);
+    return;
+  }
+
+  closeModal();
+  const dialog = new UseItemDialog({
+    actor,
+    item,
+    model,
+    activeConcentration,
+    services: {
+      actorId: () => state.actorId,
+      applyTargetsForCurrentUser,
+      assessSneakAttackApplicability,
+      autoRollInstruction,
+      clearActiveModal: (app) => {
+        if (state.modalApp === app) state.modalApp = null;
+        if (state.modal === app.element) state.modal = null;
+        if (!state.modal) document.body.classList.remove("player-pilot-modal-open");
+      },
+      clearUseTargets,
+      getSneakAttackOption,
+      itemRequiresMapPlacement,
+      openManualRollDialog,
+      openPingOnMap,
+      pilotPaused,
+      renderCastPreview,
+      renderModalTargetPicker,
+      renderRollInstructions,
+      renderSneakAttackChoice,
+      runNativeItemRoll,
+      sceneId: () => state.scene?.id ?? "",
+      selectedTargetSet,
+      sendSocket,
+      setActiveModal: (app) => {
+        state.modalApp = app;
+        state.modal = app.element;
+        document.body.classList.add("player-pilot-modal-open");
+      },
+      setSelectedTargetSet,
+      targetInstructionText,
+      updateModalTargetCount,
+      useItem,
+      warnPaused
+    }
+  });
+  const openLegacyFallback = (error) => {
+    console.error("Player Pilot could not render the AppV2 item-use flow; using the legacy dialog.", error);
+    closeModal();
+    legacyOpenUseDialog(itemId, flowOptions);
+  };
+  try {
+    Promise.resolve(dialog.render(true)).catch(openLegacyFallback);
+  } catch (error) {
+    openLegacyFallback(error);
+  }
+}
+
+function legacyOpenUseDialog(itemId, flowOptions = {}) {
+  if (pilotPaused()) {
+    warnPaused();
+    return;
+  }
+  const actor = currentActor();
+  const item = findItem(itemId);
+  if (!actor || !item) return;
+  const model = game.playerPilot.model;
+  const canUseItem = model.canUseItem(item);
+  if (!canUseItem) {
+    const message = model.id === "pf2e" && item.type === "spell"
+      ? "That spell has no available slot, use, or Focus Point."
+      : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
+    ui.notifications?.warn?.(message);
+    return;
+  }
+  const activeConcentration = model.id === "dnd5e" && item.type === "spell" && model.itemRequiresConcentration(item)
+    ? model.actorConcentrationEffects(actor)[0] ?? null
+    : null;
+  if (activeConcentration && String(activeConcentration.id ?? "") !== String(flowOptions.approvedConcentrationId ?? "")) {
+    openConcentrationBreakDialog(itemId, item, activeConcentration);
     return;
   }
   const slots = model.spellSlotChoices(item);
-  const ammo = model.ammoChoices?.(actor, item) ?? [];
-  const concentration = model.concentrationWarning?.(actor, item) ?? "";
+  const ammo = model.ammoChoices?.(item) ?? [];
+  const concentration = model.concentrationWarning?.(item) ?? "";
   const normalized = model.normalizeItem(item);
   const activities = model.usableItemActivities ? model.usableItemActivities(item) : [];
-  const playerChoice = model.itemPlayerChoice?.(item, actor);
+  const playerChoice = model.itemPlayerChoice?.(item);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
   const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : "") : "");
   const baseCastLevel = item.type === "spell"
     ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
     : "";
-  const instructions = model.collectRollInstructions?.(item, actor, { castLevel: defaultCastLevel, activityId: defaultActivityId });
-  const baseInstructionsFor = (activityId = "") => model.collectRollInstructions?.(item, actor, {
+  const instructions = model.collectRollInstructions?.(item, { castLevel: defaultCastLevel, activityId: defaultActivityId });
+  const baseInstructionsFor = (activityId = "") => model.collectRollInstructions?.(item, {
     castLevel: baseCastLevel,
     activityId
   });
@@ -2715,7 +2757,7 @@ function openUseDialog(itemId, flowOptions = {}) {
     const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
     refreshSneakAttackChoice(modal, activityId);
     const options = readUseOptions(modal);
-    const currentInstructions = model.collectRollInstructions?.(item, actor, options);
+    const currentInstructions = model.collectRollInstructions?.(item, options);
     const wrap = modal.querySelector("[data-roll-instructions]");
     if (wrap) wrap.innerHTML = renderRollInstructions(currentInstructions, true);
     const castButton = modal.querySelector("[data-modal-action='castSpell']");
@@ -2839,7 +2881,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         modal.querySelector("[data-use-step='cast']")?.classList?.remove?.("hidden");
         modal.querySelector("[data-modal-action='castSpell']")?.classList?.remove?.("hidden");
       } else {
-        await finishUseFlow(modal, options, model.collectRollInstructions?.(item, actor, options));
+        await finishUseFlow(modal, options, model.collectRollInstructions?.(item, options));
       }
     },
     modalToggleTarget: async (_modal, button) => {
@@ -2905,7 +2947,7 @@ function openUseDialog(itemId, flowOptions = {}) {
         return;
       }
       const { options } = refreshRollInstructions(modal);
-      const currentInstructions = model.collectRollInstructions?.(item, actor, options);
+      const currentInstructions = model.collectRollInstructions?.(item, options);
       await finishUseFlow(modal, options, currentInstructions);
     },
     manualInstruction: async (_modal, button) => {
@@ -2945,7 +2987,7 @@ function getSneakAttackOption(actor) {
   const rogueScale = actor?.system?.scale?.rogue ?? {};
   const scale = rogueScale["sneak-attack"] ?? rogueScale.sneakAttack ?? rogueScale.sneak ?? null;
   let formula = scaleValueFormula(scale);
-  const damage = game.playerPilot.model.collectRollInstructions(feature, actor).find((entry) => entry.kind === "damage" && entry.formula);
+  const damage = game.playerPilot.model.collectRollInstructions(feature).find((entry) => entry.kind === "damage" && entry.formula);
   if (!formula) formula = String(damage?.formula ?? "").trim();
   if (!formula) {
     const description = htmlToPlain(feature.system?.description?.value ?? feature.system?.description ?? "");
@@ -3175,7 +3217,7 @@ export function updateModalTargetCount(selected, targetInfo = {}) {
   if (count) count.textContent = targetCountText(selected, targetInfo);
 }
 
-export function renderModalTargetPicker(item) {
+export function renderModalTargetPicker(item, actionAttribute = "data-modal-action") {
   if (!item?.targetInfo?.needsTarget && !item?.targetInfo?.canTarget) return "";
   const scene = state.scene;
   const tokens = displayedTargetTokens(scene).filter((token) => item.targetInfo.allowSelf || token.actorId !== state.actorId);
@@ -3185,13 +3227,13 @@ export function renderModalTargetPicker(item) {
     <div class="pp-modal-targets">
       <div class="pp-subtitle pp-group-title"><i class="fas fa-crosshairs"></i><span>Targets</span><em data-modal-target-count>${escapeHtml(targetCountText(selected.size, item.targetInfo))}</em></div>
       <div class="pp-target-list">
-        ${tokens.slice(0, 10).map((token) => renderModalTargetRow(token, selected, item)).join("")}
+        ${tokens.slice(0, 10).map((token) => renderModalTargetRow(token, selected, item, actionAttribute)).join("")}
       </div>
     </div>
   `;
 }
 
-function renderModalTargetRow(token, selected, item) {
+function renderModalTargetRow(token, selected, item, actionAttribute = "data-modal-action") {
   const isSelected = selected.has(token.id);
   const range = targetRangeLabel(token, item);
   const disabled = range?.out === true;
@@ -3205,7 +3247,7 @@ function renderModalTargetRow(token, selected, item) {
           ${renderTargetStateBadges(token)}
         </div>
       </div>
-      <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" data-modal-action="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
+      <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" ${actionAttribute}="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
     </article>
   `;
 }
@@ -3321,7 +3363,7 @@ function openRollChoiceDialog(data = {}) {
   });
 }
 
-export function renderRollInstructions(instructions = [], allowManual = true) {
+export function renderRollInstructions(instructions = [], allowManual = true, actionAttribute = "data-modal-action") {
   if (!instructions.length) return "";
   return `
     <div class="pp-roll-instructions">
@@ -3339,13 +3381,13 @@ export function renderRollInstructions(instructions = [], allowManual = true) {
             <div class="pp-roll-instruction-actions ${Array.isArray(entry.nativeChoices) && entry.nativeChoices.length ? "pp-native-choice-actions" : ""}">
               ${Array.isArray(entry.nativeChoices) && entry.nativeChoices.length
         ? entry.nativeChoices.map((choice) => `
-                  <button class="pp-button ${choice.primary === true || Number(choice.attackNumber ?? 0) === 1 ? "primary" : ""}" type="button" data-modal-action="${escapeHtml(choice.modalAction ?? entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(choice.nativeAction ?? entry.nativeAction)}" data-operation="${escapeHtml(choice.operation ?? entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(choice.attackNumber ?? "")}" data-variant-index="${escapeHtml(choice.variantIndex ?? entry.variantIndex ?? "")}" title="${escapeHtml(choice.formula ?? choice.label)}">${escapeHtml(choice.buttonLabel ?? choice.label)}</button>
+                  <button class="pp-button ${choice.primary === true || Number(choice.attackNumber ?? 0) === 1 ? "primary" : ""}" type="button" ${actionAttribute}="${escapeHtml(choice.modalAction ?? entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(choice.nativeAction ?? entry.nativeAction)}" data-operation="${escapeHtml(choice.operation ?? entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(choice.attackNumber ?? "")}" data-variant-index="${escapeHtml(choice.variantIndex ?? entry.variantIndex ?? "")}" title="${escapeHtml(choice.formula ?? choice.label)}">${escapeHtml(choice.buttonLabel ?? choice.label)}</button>
                 `).join("")
-        : `<button class="pp-button primary" type="button" data-modal-action="${escapeHtml(entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(entry.nativeAction)}" data-operation="${escapeHtml(entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(entry.attackNumber ?? "")}" data-variant-index="${escapeHtml(entry.variantIndex ?? "")}">${escapeHtml(entry.buttonLabel ?? `Roll ${entry.kind === "damage" ? "Damage" : entry.kind === "healing" ? "Healing" : ""}`)}</button>`}
+        : `<button class="pp-button primary" type="button" ${actionAttribute}="${escapeHtml(entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(entry.nativeAction)}" data-operation="${escapeHtml(entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(entry.attackNumber ?? "")}" data-variant-index="${escapeHtml(entry.variantIndex ?? "")}">${escapeHtml(entry.buttonLabel ?? `Roll ${entry.kind === "damage" ? "Damage" : entry.kind === "healing" ? "Healing" : ""}`)}</button>`}
             </div>
           ` : (allowManual && entry.formula ? `
             <div class="pp-roll-instruction-actions">
-              <button class="pp-button primary" type="button" data-modal-action="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}">Auto</button>
+              <button class="pp-button primary" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}">Auto</button>
             </div>
           ` : "")}
         </article>
@@ -3441,7 +3483,7 @@ async function rollFormulaForActor(actor, data = {}) {
 }
 
 function openRollReminderDialog(item, actor, options = {}) {
-  const instructions = game.playerPilot.model.collectRollInstructions(item, actor, options);
+  const instructions = game.playerPilot.model.collectRollInstructions(item, options);
   if (!instructions.length) return;
   openModal(`
     <h2>${escapeHtml(itemDisplayName(item))}</h2>
@@ -3544,7 +3586,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
-  const canUseItem = game.playerPilot.model.canUseItem?.(actor, item) ?? game.playerPilot.model.itemCanBeUsed(item);
+  const canUseItem = game.playerPilot.model.canUseItem(item);
   if (!canUseItem) {
     const message = game.playerPilot.model.id === "pf2e" && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
@@ -3844,6 +3886,21 @@ function sceneStateFingerprint(scene) {
   ].join(";");
 }
 
+const tokenMovementQueues = new Map();
+
+function queueTokenMovement(data, options = {}) {
+  const key = `${String(data?.sceneId ?? "")}.${String(data?.tokenId ?? data?.actorId ?? "")}`;
+  const prior = tokenMovementQueues.get(key) ?? Promise.resolve();
+  const queued = prior
+    .catch(() => undefined)
+    .then(() => moveTokenDocument(data, options));
+  tokenMovementQueues.set(key, queued);
+  queued.finally(() => {
+    if (tokenMovementQueues.get(key) === queued) tokenMovementQueues.delete(key);
+  }).catch(() => undefined);
+  return queued;
+}
+
 async function moveActiveToken(dir) {
   if (pilotPaused()) {
     warnPaused();
@@ -3864,7 +3921,7 @@ async function moveActiveToken(dir) {
   const authority = String(setting("movementAuthority", "playerFirst"));
   if (authority === "playerFirst" && canvas?.ready) {
     try {
-      const result = await moveTokenDocument(payload, { showRuler: true });
+      const result = await queueTokenMovement(payload, { showRuler: true });
       updatePlayerMovementStatus({ ...result, sceneId, tokenId: token.id }, dir);
       state.lastMoveDir = dir;
       addLog(state.lastMoveLabel);
@@ -3924,7 +3981,7 @@ async function moveTokenDocument({ tokenId, sceneId, dir }, options = {}) {
   } else {
     throw new Error("Constrained token movement is unavailable.");
   }
-  const actual = await resolveMovedTokenPosition(tokenDoc, previous, target, moveResult);
+  const actual = await resolveMovedTokenPosition(tokenDoc, previous, target, moveResult, grid);
   if (actual.x === previous.x && actual.y === previous.y) {
     return { moved: false, distanceFeet: 0, units: String(scene?.grid?.units ?? state.scene?.gridUnits ?? "ft"), previous, target: actual };
   }
@@ -3959,34 +4016,70 @@ function tokenPositionFromMoveResult(moveResult) {
   return null;
 }
 
-async function resolveMovedTokenPosition(tokenDoc, previous, _target, moveResult) {
-  const changed = (point) => point && (point.x !== previous.x || point.y !== previous.y);
-  const returned = tokenPositionFromMoveResult(moveResult);
-  if (changed(returned)) return returned;
-  const immediate = tokenPositionFromDocument(tokenDoc);
-  if (changed(immediate)) return immediate;
+async function resolveMovedTokenPosition(tokenDoc, previous, target, moveResult, grid = 100) {
+  const tolerance = Math.max(0.5, Number(grid ?? 100) * 0.005);
+  const samePosition = (a, b) => (
+    a && b
+    && Math.abs(Number(a.x) - Number(b.x)) <= tolerance
+    && Math.abs(Number(a.y) - Number(b.y)) <= tolerance
+  );
+  const changed = (point) => point && !samePosition(point, previous);
+  const normalize = (point) => {
+    if (!point) return null;
+    if (samePosition(point, target)) return { x: Number(target.x), y: Number(target.y) };
+    return { x: Number(point.x), y: Number(point.y) };
+  };
 
-  return new Promise((resolve) => {
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      const latest = tokenPositionFromDocument(tokenDoc);
-      if (!changed(latest) && Date.now() - startedAt < 600) return;
-      window.clearInterval(timer);
-      resolve(changed(latest) ? latest : previous);
-    }, 25);
-  });
+  const startedAt = Date.now();
+  let last = null;
+  let stableSamples = 0;
+  while (Date.now() - startedAt < 900) {
+    const latest = tokenPositionFromDocument(tokenDoc);
+    if (samePosition(latest, target)) return normalize(target);
+    if (changed(latest)) {
+      stableSamples = samePosition(latest, last) ? stableSamples + 1 : 0;
+      last = latest;
+      if (stableSamples >= 3) return normalize(latest);
+    } else {
+      last = latest;
+      stableSamples = 0;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 25));
+  }
+
+  const finalDocumentPosition = tokenPositionFromDocument(tokenDoc);
+  if (changed(finalDocumentPosition)) return normalize(finalDocumentPosition);
+
+  // Some Foundry movement implementations return a position without updating the
+  // collection immediately. Only trust that result when it reached the snapped
+  // target; an arbitrary changed coordinate may be an animation frame.
+  const returned = tokenPositionFromMoveResult(moveResult);
+  if (samePosition(returned, target)) return normalize(target);
+  if (!finalDocumentPosition && changed(returned)) return normalize(returned);
+  return { x: Number(previous.x), y: Number(previous.y) };
 }
 
 function movementDistanceFeet(tokenDoc, previous, target, scene, grid) {
   const distance = Number(canvas?.scene?.grid?.distance ?? scene?.grid?.distance ?? state.scene?.gridDistance ?? 5) || 5;
   const from = tokenCenterAt(tokenDoc, previous, grid);
   const to = tokenCenterAt(tokenDoc, target, grid);
-  try {
-    const measured = canvas?.scene?.grid?.measurePath?.([from, to]) ?? scene?.grid?.measurePath?.([from, to]);
-    const measuredDistance = Number(measured?.distance ?? measured);
-    if (Number.isFinite(measuredDistance) && measuredDistance > 0) return measuredDistance;
-  } catch (_err) {
-    // use geometric fallback
+  const gridSteps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) / grid;
+  const minimumPlausible = gridSteps * distance * 0.75;
+  const measureFunctions = [
+    canvas?.grid?.measurePath?.bind?.(canvas.grid),
+    canvas?.scene?.grid?.measurePath?.bind?.(canvas.scene.grid),
+    scene?.grid?.measurePath?.bind?.(scene.grid)
+  ].filter((measure) => typeof measure === "function");
+  for (const measure of measureFunctions) {
+    try {
+      const measured = measure([from, to], { preview: true });
+      const measuredDistance = Number(measured?.distance ?? measured);
+      if (Number.isFinite(measuredDistance) && measuredDistance > 0 && measuredDistance >= minimumPlausible) {
+        return measuredDistance;
+      }
+    } catch (_err) {
+      // Try the next native grid measurement before using geometry.
+    }
   }
   return (Math.hypot(to.x - from.x, to.y - from.y) / grid) * distance;
 }
@@ -4033,9 +4126,13 @@ function updatePlayerMovementStatus(result, dir = "") {
     || point.y !== list[index - 1]?.y
   ));
   const suppliedTotal = Number(result?.totalDistance ?? result?.totalFeet ?? NaN);
+  const scene = getSceneDoc(sceneId);
+  const tokenDoc = scene?.tokens?.get?.(tokenId) ?? asArray(scene?.tokens).find((token) => String(token.id) === tokenId);
+  const measuredTotal = tokenDoc ? measureMovementPath(scene, deduped, tokenDoc) : null;
   const total = Number.isFinite(suppliedTotal)
     ? suppliedTotal
-    : (measureMovementPathFromSceneState(deduped)
+    : (measuredTotal
+      ?? measureMovementPathFromSceneState(deduped)
       ?? (withinBurst ? Number(state.movementBurst.total ?? 0) + step : step));
   if (state.movementBurst.timer) window.clearTimeout(state.movementBurst.timer);
   state.movementBurst.lastAt = now;
@@ -4118,7 +4215,7 @@ function recordGmMovementBurst(data, result) {
   };
   const points = withinBurst ? [...prior.points, end] : [start, end];
   const deduped = points.filter((point, index, list) => index === 0 || point.x !== list[index - 1].x || point.y !== list[index - 1].y);
-  const totalDistance = measureMovementPath(scene, deduped)
+  const totalDistance = measureMovementPath(scene, deduped, tokenDoc)
     ?? (withinBurst ? Number(prior.totalDistance ?? 0) + Number(result.distanceFeet ?? 0) : Number(result.distanceFeet ?? 0));
   if (prior?.timer) window.clearTimeout(prior.timer);
   const timer = window.setTimeout(() => {
@@ -4142,14 +4239,31 @@ function recordGmMovementBurst(data, result) {
   return burst;
 }
 
-function measureMovementPath(scene, points = []) {
+function measureMovementPath(scene, points = [], tokenDoc = null) {
   if (!Array.isArray(points) || points.length < 2) return null;
-  try {
-    const result = scene?.grid?.measurePath?.(points);
-    const distance = Number(result?.distance ?? result);
-    if (Number.isFinite(distance) && distance > 0) return Math.round(distance * 10) / 10;
-  } catch (_err) {
-    // Fall back to adding individual movement segments.
+  const grid = Number(scene?.grid?.size ?? canvas?.grid?.size ?? state.scene?.gridSize ?? 100) || 100;
+  const centered = tokenDoc ? points.map((point) => tokenCenterAt(tokenDoc, point, grid)) : points;
+  const gridDistance = Number(canvas?.scene?.grid?.distance ?? scene?.grid?.distance ?? state.scene?.gridDistance ?? 5) || 5;
+  let minimumPlausible = 0;
+  for (let index = 1; index < centered.length; index += 1) {
+    const dx = Math.abs(Number(centered[index].x) - Number(centered[index - 1].x));
+    const dy = Math.abs(Number(centered[index].y) - Number(centered[index - 1].y));
+    minimumPlausible += (Math.max(dx, dy) / grid) * gridDistance * 0.75;
+  }
+  const measureFunctions = [
+    scene?.grid?.measurePath?.bind?.(scene.grid),
+    canvas?.grid?.measurePath?.bind?.(canvas.grid)
+  ].filter((measure) => typeof measure === "function");
+  for (const measure of measureFunctions) {
+    try {
+      const result = measure(centered, { preview: true });
+      const distance = Number(result?.distance ?? result);
+      if (Number.isFinite(distance) && distance > 0 && distance >= minimumPlausible) {
+        return Math.round(distance * 10) / 10;
+      }
+    } catch (_err) {
+      // Try the next native grid measurement before falling back.
+    }
   }
   return null;
 }
@@ -4183,17 +4297,17 @@ function drawMovementBurstOverlay(tokenDoc, points, distance, color) {
   overlay.eventMode = "none";
   const lineColor = movementOverlayColor(color);
   const shadow = new PIXI.Graphics();
-  shadow.lineStyle(8, 0x071016, 0.55);
+  shadow.lineStyle(4, 0x071016, 0.3);
   shadow.moveTo(centers[0].x, centers[0].y);
   centers.slice(1).forEach((point) => shadow.lineTo(point.x, point.y));
   const line = new PIXI.Graphics();
-  line.lineStyle(4, lineColor, 0.96);
+  line.lineStyle(2, lineColor, 0.78);
   line.moveTo(centers[0].x, centers[0].y);
   centers.slice(1).forEach((point) => line.lineTo(point.x, point.y));
   const markers = new PIXI.Graphics();
   centers.forEach((point, index) => {
-    markers.beginFill(index === centers.length - 1 ? 0xffffff : lineColor, 1);
-    markers.drawCircle(point.x, point.y, index === centers.length - 1 ? 8 : 5);
+    markers.beginFill(index === centers.length - 1 ? 0xffffff : lineColor, 0.85);
+    markers.drawCircle(point.x, point.y, index === centers.length - 1 ? 5 : 3.5);
     markers.endFill();
   });
   overlay.addChild(shadow, line, markers);
@@ -4201,23 +4315,23 @@ function drawMovementBurstOverlay(tokenDoc, points, distance, color) {
   const units = String(tokenDoc?.parent?.grid?.units ?? state.scene?.gridUnits ?? "ft");
   const label = createPixiText(`${Math.round(Number(distance ?? 0) * 10) / 10} ${units}`, {
     fontFamily: "Signika, Arial",
-    fontSize: 24,
+    fontSize: 17,
     fontWeight: "700",
     fill: lineColor
   });
   label.anchor?.set?.(0.5, 1);
-  label.position?.set?.(last.x, last.y - 16);
+  label.position?.set?.(last.x, last.y - 12);
   const labelBg = new PIXI.Graphics();
-  const padX = 12;
-  const padY = 7;
-  labelBg.beginFill(0xffffff, 0.96);
-  labelBg.lineStyle(3, lineColor, 1);
+  const padX = 8;
+  const padY = 5;
+  labelBg.beginFill(0xffffff, 0.8);
+  labelBg.lineStyle(1.5, lineColor, 0.65);
   labelBg.drawRoundedRect(
     last.x - (label.width / 2) - padX,
-    last.y - 16 - label.height - padY,
+    last.y - 12 - label.height - padY,
     label.width + (padX * 2),
     label.height + (padY * 2),
-    9
+    7
   );
   labelBg.endFill();
   overlay.addChild(labelBg, label);
@@ -4427,7 +4541,7 @@ async function handleGmSocket(data) {
       const moveData = tokenDoc
         ? { ...data, tokenId: tokenDoc.id, sceneId: tokenDoc.parent?.id ?? data.sceneId }
         : data;
-      const result = await moveTokenDocument(moveData, { showRuler: false });
+      const result = await queueTokenMovement(moveData, { showRuler: false });
       const burst = recordGmMovementBurst(moveData, result);
       sendSocket("commandResult", {
         targetUserIds: [data.userId],
