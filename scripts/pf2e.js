@@ -61,7 +61,10 @@ export class PF2eModel extends BaseModel {
       key: "stats",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/pf2e/stats-view.hbs",
     },
-    { key: "actions" },
+    {
+      key: "actions",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/pf2e/actions-view.hbs",
+    },
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },

@@ -1643,8 +1643,7 @@ function renderActionGroup(title, items = [], adapterId = "") {
             <div class="pp-section-header pp-big-header pp-combined-header">
               <h2>
                 <i class="fas ${escapeHtml(sectionIcon(key))}"></i>
-                <span>${escapeHtml(title)}</span>
-                <b>-</b>
+                ${title ? `<span>${escapeHtml(title)}</span><b>-</b>` : ""}
                 <img src="${escapeHtml(`${CORE_ICON_ROOT}/${icon}`)}" alt="">
                 <span>${escapeHtml(label)}</span>
               </h2>

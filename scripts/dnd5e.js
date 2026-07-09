@@ -75,7 +75,10 @@ export class DnD5eModel extends BaseModel {
       key: "stats",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dnd5e/stats-view.hbs",
     },
-    { key: "actions" },
+    {
+      key: "actions",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dnd5e/actions-view.hbs",
+    },
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },

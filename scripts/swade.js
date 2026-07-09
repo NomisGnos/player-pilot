@@ -17,7 +17,10 @@ export class SwadeModel extends BaseModel {
       key: "stats",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/stats-view.hbs",
     },
-    { key: "actions" },
+    {
+      key: "actions",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/actions-view.hbs",
+    },
     {
       key: "skills",
       label: "Skills",
