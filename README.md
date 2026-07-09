@@ -150,10 +150,6 @@ Please visit my Patreon and drop me a goodberry:
 https://www.patreon.com/cw/nomisDM
 ```
 
-## Credits
-
-Special thanks to [ddbrown30](https://github.com/ddbrown30) for contributing the system interface rework and SWADE support.
-
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
@@ -161,3 +157,5 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 Some icons are from [game-icons.net](https://game-icons.net/) and are used under the Creative Commons Attribution 3.0 license. Icons are credited to their respective authors where applicable.
+
+Special thanks to [ddbrown30](https://github.com/ddbrown30) for contributing the system interface rework and SWADE support.

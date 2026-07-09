@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.17
+- **ddbrown30** Split the Actions view into system-specific templates so SWADE, D&D5e, and PF2e can render their own action group layouts without breaking each other.
+- **ddbrown30** Added a Show Player Pilot Controls Button setting so GMs can hide the floating controls toggle when they do not need it.
+
 ## v0.2.16
 - Refactored Player Pilot around system-specific models and Handlebars views, with a dedicated AppV2 item-use flow.
 - Added SWADE support while preserving D&D5e and PF2e behavior.
