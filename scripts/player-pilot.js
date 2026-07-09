@@ -1127,7 +1127,7 @@ async function registerHandlebarsHelpers() {
     renderSmartBadge,
     renderBadge,
     filterItemsForView,
-    renderFilterMenuButton,
+    renderFilterMenu,
     renderQuickFilters,
   });
 
@@ -1494,15 +1494,6 @@ async function renderShell() {
   await state.shell.render(true);
 }
 
-function renderSearchInput(placeholder) {
-  return `
-    <div class="pp-search-wrap">
-      <input class="pp-search" type="text" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(state.search)}" data-action="search">
-      <button class="pp-search-clear ${state.search ? "" : "hidden"}" type="button" data-action="search-clear" aria-label="Clear search"><i class="fas fa-xmark"></i></button>
-    </div>
-  `;
-}
-
 export function quickFilterFor(key) {
   const value = state.quickFilters?.[key];
   return Array.isArray(value) ? (value[0] ?? "all") : (value ?? "all");
@@ -1520,7 +1511,8 @@ export function isMultiFilterKey(key) {
 
 function renderQuickFilters(key) {
   const filters = game.playerPilot.model.quickFiltersForKey(key);
-  if (!filters.length) return "";
+  if (filters.length < 2) return "";
+  if (filters.length === 2 && filters[0][0] === "all") return "";
   const active = quickFilterFor(key);
   const selected = new Set(selectedQuickFilters(key));
   const multi = isMultiFilterKey(key);
@@ -1602,9 +1594,22 @@ function filterSelectionCount(keys = []) {
   return keys.reduce((total, key) => total + selectedQuickFilters(key).length, 0);
 }
 
-function renderFilterMenuButton(menu, keys, label = "Filters") {
-  keys = Array.isArray(keys) ? keys : [keys];
-  const count = filterSelectionCount(keys);
+function renderFilterMenu(menu, key, label = "Filters") {
+  const filters = game.playerPilot.model.quickFiltersForKey(key);
+  if (filters.length < 2) return "";
+  if (filters.length === 2 && filters[0][0] === "all") return "";
+  const open = state.filterMenuOpen === menu;
+  return `
+    ${renderFilterMenuButton(menu, key, label)}
+    <div class="pp-action-filter-popover ${open ? "open" : ""}">
+      <strong>${escapeHtml(label)}</strong>
+      ${renderQuickFilters(menu)}
+    </div>
+  `;
+}
+
+function renderFilterMenuButton(menu, key, label = "Filters") {
+  const count = filterSelectionCount([key]);
   const open = state.filterMenuOpen === menu;
   return `
     <button class="pp-filter-menu-btn ${open ? "active" : ""}" type="button" data-action="toggle-filter-menu" data-filter-menu="${escapeHtml(menu)}" title="${escapeHtml(label)}" aria-expanded="${open ? "true" : "false"}">
