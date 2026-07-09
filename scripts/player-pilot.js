@@ -1093,6 +1093,21 @@ function registerSettings() {
     }
   });
 
+  game.settings.register(MODULE_ID, "showMapControlsToggleButton", {
+    name: "Show Player Pilot Controls Button",
+    hint: "Shows a button on the GM to toggle Player Pilot controls.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: (enabled) => {
+      if (game.user.isGM) {
+        if (enabled) installGmMapToggleButton();
+        else removeGmMapToggleButton();
+      }
+    }
+  });
+
   game.settings.register(MODULE_ID, "combatTurnLock", {
     name: localize("PlayerPilot.settings.combatLock.name"),
     hint: localize("PlayerPilot.settings.combatLock.hint"),
@@ -5416,6 +5431,12 @@ function installGmMapToggleButton() {
   sync();
 }
 
+function removeGmMapToggleButton() {
+  const toggleElement = document.getElementById("player-pilot-gm-map-toggle")
+  if (!game.user?.isGM || !toggleElement) return;
+  toggleElement.remove();
+}
+
 let audioSuppressionInstalled = false;
 
 function shouldSuppressPlayerAudio() {
@@ -5707,7 +5728,9 @@ function registerHooks() {
       installAudioSuppression();
     }
     installChatModeBridge();
-    if (game.user?.isGM) installGmMapToggleButton();
+    if (setting("showMapControlsToggleButton")) {
+      installGmMapToggleButton();
+    }
     await showGmChangelogOnce();
     await enforceNoCanvasIfNeeded();
     if (userIsPilot()) {
