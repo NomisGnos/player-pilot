@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.16
+- Refactored Player Pilot around system-specific models and Handlebars views, with a dedicated AppV2 item-use flow.
+- Added SWADE support while preserving D&D5e and PF2e behavior.
+- Fixed currency controls, concentration replacement, and several item/spell-use regressions.
+- Fixed fractional movement steps and missing waypoints, and made the movement overlay less intrusive.
+- Thanks to **ddbrown30** for helping with the refactor and implementing SWADE support.
+
 ## v0.2.15
 - Fixed Player Pilot movement so no-canvas clients validate movement on the GM canvas without showing GM-colored ruler paths.
 - Updated no-canvas movement results locally instead of forcing a full scene-state refresh after every movement step.
