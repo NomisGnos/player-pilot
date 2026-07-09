@@ -4,12 +4,7 @@
 
         <div class="pp-filter-funnel-row">
             <span><i class="fas fa-sack-xmark"></i> Inventory</span>
-
-            {{{renderFilterMenuButton "inventory" "inventory" "Inventory filters"}}}
-            <div class="pp-action-filter-popover {{#if (eq state.filterMenuOpen 'inventory')}}open{{/if}}">
-                <strong>Inventory Filters</strong>
-                {{{renderQuickFilters "inventory"}}}
-            </div>
+            {{{renderFilterMenu "inventory" "inventory" "Inventory filters"}}}
         </div>
 
         {{#if model.groups.currency}}

@@ -17,7 +17,10 @@ export class SwadeModel extends BaseModel {
       key: "stats",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/stats-view.hbs",
     },
-    { key: "actions" },
+    {
+      key: "actions",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/swade/actions-view.hbs",
+    },
     {
       key: "skills",
       label: "Skills",
@@ -276,6 +279,9 @@ export class SwadeModel extends BaseModel {
       value: pp.value,
       max: pp.max
     })).sort((a, b) => a.name.localeCompare(b.name));
+
+    //Now that we're done with them, flatten the filter values so that they'll match what we need in renderQuickFilters
+    this.groups.powers.filters = this.groups.powers.filters.map(({ key, label, icon }) => [key, label, icon]);
   }
 
   refreshCurrencyGroup() {
@@ -464,22 +470,35 @@ export class SwadeModel extends BaseModel {
 
   quickFiltersForKey(view) {
     if (view === "actions") {
-      return [
-        ["all", "All", "fa-layer-group"],
+      const filters = [
         ["weapon", "Weapons", "fa-sword"],
         ["power", "Powers", "fa-wand-magic-sparkles"],
         ["consumable", "Consumables", "fa-flask"],
       ];
-    }
-    if (view === "inventory") {
+      const types = new Set(this.groups.actions.map(a => a.type));
       return [
         ["all", "All", "fa-layer-group"],
+        ...filters.filter(([type]) => types.has(type)),
+      ];
+    }
+
+    if (view === "inventory") {
+      const filters = [
         ["weapon", "Weapons", "fa-sword"],
         ["armor", "Armor", "fa-helmet-battle"],
         ["shield", "Shields", "fa-shield"],
         ["gear", "Gear", "fa-box-open"],
         ["consumable", "Consumables", "fa-flask"],
       ];
+      const types = new Set(this.groups.inventory.flatMap(group => group.items).map(a => a.type));
+      return [
+        ["all", "All", "fa-layer-group"],
+        ...filters.filter(([type]) => types.has(type)),
+      ];
+    }
+
+    if (view === "powers") {
+      return this.groups.powers.filters;
     }
     return super.quickFiltersForKey(view);
   }

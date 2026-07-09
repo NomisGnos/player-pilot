@@ -1,6 +1,6 @@
 <main class="pp-body">
     <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'actions')}}active{{/if}}" data-tab="actions">
-        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search actions, spells, items..."}}
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search actions..."}}
         <div class="pp-action-filter-tools">
             {{{renderQuickFilters "actions"}}}
         </div>

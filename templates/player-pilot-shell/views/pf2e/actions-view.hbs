@@ -1,0 +1,24 @@
+<main class="pp-body">
+    <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'actions')}}active{{/if}}" data-tab="actions">
+        {{>"modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs" this placeholder="Search actions, spells, items..."}}
+        <div class="pp-action-filter-tools">
+            {{{renderQuickFilters "actions"}}}
+            {{{renderActionFilterMenuButton}}}
+            <div class="pp-action-filter-popover {{#if (eq state.filterMenuOpen 'actions')}}open{{/if}}">
+                <strong>Action Type</strong>
+                {{{renderQuickFilters "actionTiming"}}}
+                {{#if (eq activeFilter "spell")}}
+                    <strong>Spell Traits</strong>
+                    {{{renderQuickFilters "actionSpellTraits"}}}
+                {{/if}}
+            </div>
+        </div>
+        {{{renderActionGroup "One Action" model.groups.actionGroups.action1 model.id}}}
+        {{{renderActionGroup "Two Actions" model.groups.actionGroups.action2 model.id}}}
+        {{{renderActionGroup "Three Actions" model.groups.actionGroups.action3 model.id}}}
+        {{{renderActionGroup "Reactions" model.groups.actionGroups.reaction model.id}}}
+        {{{renderActionGroup "Free Actions" model.groups.actionGroups.free model.id}}}
+        {{{renderActionGroup "Passive" model.groups.actionGroups.passive model.id}}}
+        {{{renderActionGroup "Other" model.groups.actionGroups.other model.id}}}
+    </section>
+</main>
