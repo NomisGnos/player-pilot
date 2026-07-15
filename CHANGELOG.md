@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.2.18
+- Added GM-configured seat-relative movement calibration with party-display rotation, an eight-position player seat picker, and movement-direction previews.
+
 ## v0.2.17
 - **ddbrown30** Split the Actions view into system-specific templates so SWADE, D&D5e, and PF2e can render their own action group layouts without breaking each other.
 - **ddbrown30** Added a Show Player Pilot Controls Button setting so GMs can hide the floating controls toggle when they do not need it.

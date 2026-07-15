@@ -78,6 +78,7 @@ The shell has tabs for:
 - D&D5e short-rest and long-rest controls.
 - PF2e Rest for the Night with its confirmation routed to the connected GM.
 - D-pad token movement.
+- GM-calibrated seat-relative D-pad movement for flat-table party displays, including rotated or flipped displays.
 - Player-first movement with GM fallback.
 - GM-authoritative socket routing when player-side execution is not available.
 - Target selection inside actions and spells that need a target.
@@ -102,7 +103,7 @@ The shell has tabs for:
 
 ## Settings
 
-- `Player Pilot Access`: choose which players get the mobile shell.
+- `Player Pilot Access`: choose which players get the mobile shell, set the party-display orientation, and calibrate where each player sits.
 - `Activation Mode`: off, selected players only, or all non-GM players.
 - `Use No-Canvas Mode`: reduces player client rendering. This is recommended for phones.
 - `Movement Authority`: player-first with GM fallback, or always GM-authoritative.

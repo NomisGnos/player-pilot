@@ -37,6 +37,28 @@ const BOOT_INITIAL_DRIFT_MS = 18000;
 const BOOT_MIN_DRIFT_MS = 30000;
 const BOOT_MAX_DRIFT_MS = 60000;
 const STARTUP_NOTICE_LIFETIME_MS = 10000;
+const MOVEMENT_DIRECTIONS = ["up", "up-right", "right", "down-right", "down", "down-left", "left", "up-left"];
+const PLAYER_SEATS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+const PLAYER_SEAT_LABELS = {
+  n: "Top",
+  ne: "Top right",
+  e: "Right",
+  se: "Bottom right",
+  s: "Bottom",
+  sw: "Bottom left",
+  w: "Left",
+  nw: "Top left"
+};
+const PLAYER_SEAT_UP_STEPS = {
+  n: 4,
+  ne: 5,
+  e: 6,
+  se: 7,
+  s: 0,
+  sw: 1,
+  w: 2,
+  nw: 3
+};
 let noCanvasNeedsReload = false;
 
 const bootState = {
@@ -510,6 +532,55 @@ export function setting(key, fallback = null) {
   }
 }
 
+function normalizedDisplayRotation(value) {
+  const rotation = Math.round(Number(value ?? 0) / 90) * 90;
+  return ((rotation % 360) + 360) % 360;
+}
+
+function normalizedPlayerSeat(value) {
+  const seat = String(value ?? "s").toLowerCase();
+  return PLAYER_SEATS.includes(seat) ? seat : "s";
+}
+
+function playerSeatForUser(userId = game.user?.id) {
+  const seats = setting("playerSeatOrientations", {});
+  return normalizedPlayerSeat(seats?.[String(userId ?? "")]);
+}
+
+function directionLabel(direction) {
+  return capitalizeWords(String(direction ?? "up").replaceAll("-", " "));
+}
+
+function movementOrientationForUser(userId = game.user?.id, seatOverride = null, rotationOverride = null) {
+  const seat = normalizedPlayerSeat(seatOverride ?? playerSeatForUser(userId));
+  const displayRotation = normalizedDisplayRotation(rotationOverride ?? setting("partyDisplayRotation", 0));
+  const upStep = ((Number(PLAYER_SEAT_UP_STEPS[seat] ?? 0) - (displayRotation / 45)) % 8 + 8) % 8;
+  const direction = MOVEMENT_DIRECTIONS[upStep] ?? "up";
+  return {
+    seat,
+    seatLabel: PLAYER_SEAT_LABELS[seat] ?? "Bottom",
+    displayRotation,
+    upStep,
+    direction,
+    directionLabel: directionLabel(direction)
+  };
+}
+
+function orientedMovementDirection(direction, userId = game.user?.id) {
+  const inputStep = MOVEMENT_DIRECTIONS.indexOf(String(direction ?? "").toLowerCase());
+  if (inputStep < 0) return direction;
+  const orientation = movementOrientationForUser(userId);
+  return MOVEMENT_DIRECTIONS[(inputStep + orientation.upStep) % MOVEMENT_DIRECTIONS.length];
+}
+
+function seatPositionStyle(seat) {
+  const index = PLAYER_SEATS.indexOf(normalizedPlayerSeat(seat));
+  const angle = ((index * 45) - 90) * (Math.PI / 180);
+  const left = 50 + (43 * Math.cos(angle));
+  const top = 50 + (42 * Math.sin(angle));
+  return `left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;`;
+}
+
 function userIsPilot(user = game.user) {
   if (!user || user.isGM) return false;
   const mode = String(setting("activationMode", "selected"));
@@ -917,7 +988,7 @@ class PlayerPilotAccessPanel extends FormApplication {
       id: "player-pilot-access",
       title: "Player Pilot Access",
       template: "modules/player-pilot/templates/player-access-panel.html",
-      width: 460,
+      width: 620,
       height: "auto",
       closeOnSubmit: true
     });
@@ -925,16 +996,48 @@ class PlayerPilotAccessPanel extends FormApplication {
 
   getData() {
     const enabled = setting("enabledUsers", {});
+    const displayRotation = normalizedDisplayRotation(setting("partyDisplayRotation", 0));
     return {
+      displayOrientations: [
+        { value: 0, label: "Top edge", icon: "fa-arrow-up", checked: displayRotation === 0 },
+        { value: 90, label: "Right edge", icon: "fa-arrow-right", checked: displayRotation === 90 },
+        { value: 180, label: "Bottom edge", icon: "fa-arrow-down", checked: displayRotation === 180 },
+        { value: 270, label: "Left edge", icon: "fa-arrow-left", checked: displayRotation === 270 }
+      ],
       players: asArray(game.users)
         .filter((user) => !user.isGM)
         .map((user) => ({
           id: user.id,
           name: user.name,
           avatar: user.avatar ?? "icons/svg/mystery-man.svg",
-          enabled: enabled?.[user.id] === true
+          enabled: enabled?.[user.id] === true,
+          seat: movementOrientationForUser(user.id).seatLabel
         }))
     };
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    const root = html?.[0] ?? html;
+    if (!(root instanceof HTMLElement)) return;
+    root.querySelectorAll("[data-action='configure-orientation']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        const userId = String(button.dataset.userId ?? "");
+        if (!userId) return;
+        const selectedRotation = root.querySelector("input[name='displayRotation']:checked");
+        new PlayerMovementOrientationPanel(userId, {
+          initialRotation: selectedRotation instanceof HTMLInputElement ? selectedRotation.value : setting("partyDisplayRotation", 0),
+          onSaved: (orientation) => {
+            root.querySelectorAll("input[name='displayRotation']").forEach((input) => {
+              if (input instanceof HTMLInputElement) input.checked = Number(input.value) === orientation.displayRotation;
+            });
+            const label = button.querySelector("span");
+            if (label) label.textContent = orientation.seatLabel;
+          }
+        }).render(true);
+      });
+    });
   }
 
   async _updateObject(_event, formData) {
@@ -944,7 +1047,167 @@ class PlayerPilotAccessPanel extends FormApplication {
       const nested = formData.enabled?.[user.id];
       next[user.id] = flat === true || flat === "on" || nested === true || nested === "on";
     }
+    const displayRotation = normalizedDisplayRotation(formData.displayRotation ?? setting("partyDisplayRotation", 0));
+    await game.settings.set(MODULE_ID, "partyDisplayRotation", displayRotation);
     await game.settings.set(MODULE_ID, "enabledUsers", next);
+    notifyPilotsToRefresh();
+  }
+}
+
+class PlayerMovementOrientationPanel extends FormApplication {
+  constructor(userId, options = {}) {
+    const user = game.users?.get?.(userId) ?? asArray(game.users).find((entry) => String(entry.id) === String(userId));
+    const {
+      initialRotation = setting("partyDisplayRotation", 0),
+      onSaved = null,
+      ...applicationOptions
+    } = options;
+    super({}, { ...applicationOptions, title: `${user?.name ?? "Player"} Movement Orientation` });
+    this.userId = String(userId ?? "");
+    this.user = user ?? null;
+    this._seat = playerSeatForUser(this.userId);
+    this._displayRotation = normalizedDisplayRotation(initialRotation);
+    this._onSaved = typeof onSaved === "function" ? onSaved : null;
+  }
+
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: "player-pilot-movement-orientation",
+      title: "Player Movement Orientation",
+      template: "modules/player-pilot/templates/player-movement-orientation.html",
+      width: 560,
+      height: "auto",
+      closeOnSubmit: true
+    });
+  }
+
+  getData() {
+    const orientation = movementOrientationForUser(this.userId, this._seat, this._displayRotation);
+    return {
+      player: {
+        id: this.userId,
+        name: this.user?.name ?? "Player",
+        avatar: this.user?.avatar ?? "icons/svg/mystery-man.svg"
+      },
+      seat: orientation.seat,
+      seatLabel: orientation.seatLabel,
+      seatStyle: seatPositionStyle(orientation.seat),
+      displayRotation: orientation.displayRotation,
+      directionLabel: orientation.directionLabel,
+      directionRotation: orientation.upStep * 45
+    };
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    const root = html?.[0] ?? html;
+    if (!(root instanceof HTMLElement)) return;
+    const diagram = root.querySelector("[data-orientation-diagram]");
+    const dot = root.querySelector("[data-seat-dot]");
+
+    root.querySelectorAll("[data-rotate-display]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._displayRotation = normalizedDisplayRotation(this._displayRotation + Number(button.dataset.rotateDisplay ?? 0));
+        this._paintOrientation(root);
+      });
+    });
+
+    if (diagram instanceof HTMLElement && dot instanceof HTMLElement) {
+      let dragging = false;
+      const updateFromPointer = (event, snap = false) => {
+        const bounds = diagram.getBoundingClientRect();
+        const centerX = bounds.left + (bounds.width / 2);
+        const centerY = bounds.top + (bounds.height / 2);
+        const radiusX = Math.max(1, (bounds.width / 2) - 20);
+        const radiusY = Math.max(1, (bounds.height / 2) - 20);
+        const dx = (Number(event.clientX) - centerX) / radiusX;
+        const dy = (Number(event.clientY) - centerY) / radiusY;
+        const angle = Math.atan2(dy, dx);
+        const degreesFromNorth = ((angle * 180 / Math.PI) + 90 + 360) % 360;
+        this._seat = PLAYER_SEATS[Math.round(degreesFromNorth / 45) % PLAYER_SEATS.length];
+        if (!snap) {
+          dot.style.left = `${50 + (43 * Math.cos(angle))}%`;
+          dot.style.top = `${50 + (42 * Math.sin(angle))}%`;
+          this._paintOrientation(root, { preserveDotPosition: true });
+          return;
+        }
+        this._paintOrientation(root);
+      };
+
+      diagram.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        dragging = true;
+        diagram.classList.add("dragging");
+        diagram.setPointerCapture?.(event.pointerId);
+        updateFromPointer(event, false);
+        event.preventDefault();
+      });
+      diagram.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        updateFromPointer(event, false);
+        event.preventDefault();
+      });
+      const finishDrag = (event) => {
+        if (!dragging) return;
+        dragging = false;
+        diagram.classList.remove("dragging");
+        updateFromPointer(event, true);
+        diagram.releasePointerCapture?.(event.pointerId);
+        event.preventDefault();
+      };
+      diagram.addEventListener("pointerup", finishDrag);
+      diagram.addEventListener("pointercancel", (event) => {
+        if (!dragging) return;
+        dragging = false;
+        diagram.classList.remove("dragging");
+        diagram.releasePointerCapture?.(event.pointerId);
+        this._paintOrientation(root);
+      });
+      dot.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(event.key)) return;
+        const delta = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1;
+        const index = PLAYER_SEATS.indexOf(this._seat);
+        this._seat = PLAYER_SEATS[(index + delta + PLAYER_SEATS.length) % PLAYER_SEATS.length];
+        this._paintOrientation(root);
+        event.preventDefault();
+      });
+    }
+  }
+
+  _paintOrientation(root, { preserveDotPosition = false } = {}) {
+    const orientation = movementOrientationForUser(this.userId, this._seat, this._displayRotation);
+    const seatInput = root.querySelector("input[name='seat']");
+    const rotationInput = root.querySelector("input[name='displayRotation']");
+    if (seatInput instanceof HTMLInputElement) seatInput.value = orientation.seat;
+    if (rotationInput instanceof HTMLInputElement) rotationInput.value = String(orientation.displayRotation);
+    const dot = root.querySelector("[data-seat-dot]");
+    if (dot instanceof HTMLElement) {
+      if (!preserveDotPosition) dot.setAttribute("style", seatPositionStyle(orientation.seat));
+      dot.setAttribute("aria-label", `${this.user?.name ?? "Player"} sits at ${orientation.seatLabel}`);
+      dot.title = `${this.user?.name ?? "Player"}: ${orientation.seatLabel}`;
+    }
+    root.querySelectorAll("[data-seat-label]").forEach((element) => { element.textContent = orientation.seatLabel; });
+    root.querySelectorAll("[data-direction-label]").forEach((element) => { element.textContent = orientation.directionLabel; });
+    root.querySelectorAll("[data-display-rotation-label]").forEach((element) => {
+      element.textContent = `${orientation.displayRotation} degrees`;
+    });
+    root.querySelectorAll("[data-display-top-arrow]").forEach((element) => {
+      if (element instanceof HTMLElement) element.style.transform = `rotate(${orientation.displayRotation}deg)`;
+    });
+    root.querySelectorAll("[data-preview-arrow]").forEach((element) => {
+      if (element instanceof HTMLElement) element.style.transform = `rotate(${orientation.upStep * 45}deg)`;
+    });
+  }
+
+  async _updateObject(_event, formData) {
+    const seat = normalizedPlayerSeat(formData.seat ?? this._seat);
+    const displayRotation = normalizedDisplayRotation(formData.displayRotation ?? this._displayRotation);
+    const seats = { ...setting("playerSeatOrientations", {}) };
+    seats[this.userId] = seat;
+    await game.settings.set(MODULE_ID, "partyDisplayRotation", displayRotation);
+    await game.settings.set(MODULE_ID, "playerSeatOrientations", seats);
+    this._onSaved?.(movementOrientationForUser(this.userId, seat, displayRotation));
     notifyPilotsToRefresh();
   }
 }
@@ -992,6 +1255,26 @@ function registerSettings() {
     config: false,
     type: Object,
     default: {}
+  });
+
+  game.settings.register(MODULE_ID, "partyDisplayRotation", {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0,
+    onChange: () => {
+      if (userIsPilot()) queueRender();
+    }
+  });
+
+  game.settings.register(MODULE_ID, "playerSeatOrientations", {
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {},
+    onChange: () => {
+      if (userIsPilot()) queueRender();
+    }
   });
 
   game.settings.register(MODULE_ID, "lastActorId", {
@@ -3936,7 +4219,14 @@ async function moveActiveToken(dir) {
     return;
   }
   const sceneId = state.scene?.id ?? "";
-  const payload = { actorId: actor.id, tokenId: token?.id ?? state.selectedTokenId ?? "", sceneId, dir };
+  const movementDir = orientedMovementDirection(dir);
+  const payload = {
+    actorId: actor.id,
+    tokenId: token?.id ?? state.selectedTokenId ?? "",
+    sceneId,
+    dir: movementDir,
+    controlDir: dir
+  };
   const authority = String(setting("movementAuthority", "playerFirst"));
   if (authority === "playerFirst" && canvas?.ready) {
     try {
@@ -4458,6 +4748,7 @@ async function handleSocket(data) {
     applySharedDocumentPopupMode();
     if (userIsPilot()) mountPilotShell();
     else unmountPilotShell();
+    queueRender();
     await enforceNoCanvasIfNeeded();
     return;
   }
@@ -4565,7 +4856,7 @@ async function handleGmSocket(data) {
       sendSocket("commandResult", {
         targetUserIds: [data.userId],
         message: movementResultLabel({ ...result, totalDistance: burst?.totalDistance }, data.dir),
-        dir: data.dir,
+        dir: data.controlDir ?? data.dir,
         movement: {
           ...result,
           sceneId: String(moveData.sceneId ?? ""),

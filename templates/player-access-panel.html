@@ -4,11 +4,28 @@
     <p>Choose which players should load the mobile interface after they log in.</p>
   </header>
 
+  <fieldset class="pp-display-orientation-setting">
+    <legend>Party Display Orientation</legend>
+    <p>Which physical edge of the table display shows the top of the Foundry canvas?</p>
+    <div class="pp-display-orientation-options">
+      {{#each displayOrientations}}
+      <label>
+        <input type="radio" name="displayRotation" value="{{this.value}}" {{#if this.checked}}checked{{/if}}>
+        <span><i class="fas {{this.icon}}"></i>{{this.label}}</span>
+      </label>
+      {{/each}}
+    </div>
+  </fieldset>
+
   <ol class="pp-access-list">
     {{#each players}}
     <li class="pp-access-row" data-user-id="{{this.id}}">
       <span class="pp-access-avatar" style="background-image:url('{{this.avatar}}')"></span>
       <span class="pp-access-name">{{this.name}}</span>
+      <button class="pp-orientation-configure" type="button" data-action="configure-orientation" data-user-id="{{this.id}}" title="Calibrate {{this.name}} movement">
+        <i class="fas fa-compass"></i>
+        <span>{{this.seat}}</span>
+      </button>
       <label class="pp-switch">
         <input type="checkbox" name="enabled.{{this.id}}" {{#if this.enabled}}checked{{/if}}>
         <span></span>

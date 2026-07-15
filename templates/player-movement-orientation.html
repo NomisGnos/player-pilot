@@ -1,0 +1,49 @@
+<form class="pp-movement-orientation-panel">
+  <input type="hidden" name="seat" value="{{seat}}">
+  <input type="hidden" name="displayRotation" value="{{displayRotation}}">
+
+  <header class="pp-orientation-header">
+    <span class="pp-access-avatar" style="background-image:url('{{player.avatar}}')"></span>
+    <span>
+      <h2>{{player.name}}</h2>
+      <p>Drag the player dot to where they sit. Their Up control points from their seat toward the party display.</p>
+    </span>
+  </header>
+
+  <div class="pp-orientation-diagram" data-orientation-diagram>
+    <div class="pp-orientation-ring" aria-hidden="true"></div>
+    <div class="pp-party-display">
+      <i class="fas fa-arrow-up pp-display-top-arrow" data-display-top-arrow style="transform:rotate({{displayRotation}}deg)"></i>
+      <strong>PARTY VIEW</strong>
+      <span>Foundry Top</span>
+    </div>
+    <button class="pp-player-seat-dot" type="button" data-seat-dot style="{{seatStyle}}" aria-label="{{player.name}} sits at {{seatLabel}}" title="{{player.name}}: {{seatLabel}}">
+      <i class="fas fa-user"></i>
+    </button>
+  </div>
+
+  <div class="pp-orientation-controls">
+    <button type="button" data-rotate-display="-90" title="Rotate Foundry top counterclockwise"><i class="fas fa-rotate-left"></i></button>
+    <span>Foundry Top <strong data-display-rotation-label>{{displayRotation}} degrees</strong></span>
+    <button type="button" data-rotate-display="90" title="Rotate Foundry top clockwise"><i class="fas fa-rotate-right"></i></button>
+  </div>
+
+  <div class="pp-orientation-preview">
+    <span class="pp-orientation-preview-compass" aria-hidden="true">
+      <i class="fas fa-arrow-up" data-preview-arrow style="transform:rotate({{directionRotation}}deg)"></i>
+    </span>
+    <span>
+      <strong><span data-seat-label>{{seatLabel}}</span> seat</strong>
+      <small>Player Up moves toward Foundry <span data-direction-label>{{directionLabel}}</span>.</small>
+    </span>
+  </div>
+
+  <p class="pp-orientation-note"><i class="fas fa-display"></i> Party-display rotation is shared by every calibrated player.</p>
+
+  <footer class="pp-access-actions">
+    <button type="submit">
+      <i class="fas fa-save"></i>
+      Save Orientation
+    </button>
+  </footer>
+</form>
