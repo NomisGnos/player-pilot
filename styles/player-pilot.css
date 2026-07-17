@@ -512,7 +512,7 @@ body.player-pilot-active #pause {
 
 .pp-stat.level,
 .pp-stat.rank,
-.pp-stat.bennies,
+.pp-stat.conviction,
 .pp-stat.prof {
   box-shadow: inset 3px 0 0 var(--pp-good);
 }

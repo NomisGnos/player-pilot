@@ -45,6 +45,14 @@
       </div>
 
       <div class="pp-detail-strips">
+        <div class="pp-detail-strip pp-pp-strip">
+          <div class="pp-stat-icon">{{{renderInterfaceIcon summary.bennyImage}}}</div>
+          <span>Bennies</span>
+          <button type="button" data-action="benny" data-delta="-1" title="Spend Benny"><i class="fas fa-minus"></i></button>
+          <strong>{{summary.bennies.value}} / {{summary.bennies.max}}</strong>
+          <button type="button" data-action="benny" data-delta="1" title="Get Benny"><i class="fas fa-plus"></i></button>
+        </div>
+
         {{#each summary.powerPoints}}
           <div class="pp-detail-strip pp-pp-strip">
             <i class="fas fa-sparkles"></i>

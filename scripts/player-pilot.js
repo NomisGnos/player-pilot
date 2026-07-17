@@ -1403,7 +1403,6 @@ function registerSettings() {
 
 async function loadTemplates() {
   const templates = [
-    "modules/player-pilot/templates/player-pilot-shell/partials/benny-controls.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/search-input.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs",
     "modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs",
