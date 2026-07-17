@@ -31,7 +31,7 @@
 
       <div class="pp-statuses-grid">
         {{#each summary.statuses}}
-          <label class="">
+          <label>
             <input type="checkbox" data-action="toggleStatusEffect" data-id="{{@key}}" {{#if this.value}}checked{{/if}}>
             {{this.label}}
           </label>
