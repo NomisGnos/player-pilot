@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0
+- Added player chat with public, online-GM, and direct online-user recipients; displayed chat cards are inert so embedded controls cannot interfere with Player Pilot.
+- Added large GM-synchronized, shape-correct faceted dice animations that keep rolling until the GM-side action finishes, then show the total, dice, modifier, and formula.
+- Added a dedicated Dice tab with per-player color, animation, style, and preview controls plus a small theme-registration API for future CSS, image, and SVG designs.
+- Added a dedicated Starfinder Second Edition adapter and SF2e views while sharing the compatible PF2e-family action, strike, spell-rank, and resource behavior.
+
 ## v0.2.18
 - Added GM-configured seat-relative movement calibration with party-display rotation, an eight-position player seat picker, and movement-direction previews.
 

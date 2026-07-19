@@ -2,8 +2,26 @@ import { BaseModel } from "./base-model.js";
 import { DND5E_ABILITIES, DnD5eModel } from "./dnd5e.js";
 import { PF2eModel } from "./pf2e.js";
 import { PlayerPilotShell } from "./player-pilot-shell.js";
+import { SF2eModel } from "./sf2e.js";
 import { SwadeModel } from "./swade.js";
 import { UseItemDialog } from "./use-item-dialog.js";
+import {
+  captureChatMessage,
+  configureChatFeed,
+  hydrateChatFeed,
+  removeChatMessage
+} from "./chat-feed.js";
+import {
+  captureDiceRollMessage,
+  clearDiceOverlay,
+  configureDiceOverlay,
+  exposeDiceApi,
+  prepareRollSocket,
+  registerDiceSettings,
+  resolveDiceRequest,
+  rollSummariesFrom,
+  showDiceResult
+} from "./dice-overlay.js";
 import {
   asArray,
   capitalizeWords,
@@ -473,6 +491,7 @@ export const state = {
   mapSuppressClickUntil: 0,
   navOpen: false,
   scrollBodyToTop: false,
+  chatScrollToBottom: false,
   lastMoveLabel: "",
   lastMoveDir: "",
   movementBurst: {
@@ -652,17 +671,26 @@ function manualTargetIncluded(sceneId, tokenDoc) {
 export function sendSocket(type, payload = {}) {
   if (!game.socket?.emit) return false;
   try {
+    const preparedPayload = prepareRollSocket(type, payload);
     game.socket.emit(SOCKET, {
       type,
       userId: game.user?.id ?? "",
       at: Date.now(),
-      ...payload
+      ...preparedPayload
     });
     return true;
   } catch (err) {
     console.error("Player Pilot socket send failed:", err);
     return false;
   }
+}
+
+function isPaizo2e(model = game.playerPilot?.model) {
+  return model?.rulesFamily === "paizo2e";
+}
+
+function adapterIsPaizo2e(adapterId = "") {
+  return ["pf2e", "sf2e"].includes(String(adapterId).toLowerCase());
 }
 
 export function addLog(text, details = {}) {
@@ -1232,6 +1260,7 @@ class PlayerPilotSupportPanel extends FormApplication {
 }
 
 function registerSettings() {
+  registerDiceSettings();
   game.settings.registerMenu(MODULE_ID, "access", {
     name: localize("PlayerPilot.settings.access.name"),
     label: localize("PlayerPilot.settings.access.label"),
@@ -1775,6 +1804,7 @@ function unmountPilotShell() {
   state.startupNoticeObserver = null;
   state.nativePromptObserver?.disconnect?.();
   state.nativePromptObserver = null;
+  clearDiceOverlay();
   invalidateModelCache();
 }
 
@@ -1837,7 +1867,7 @@ function matchesQuickFilter(key, item) {
 function matchesOneQuickFilter(key, filter, item) {
   if (filter === "cantrip") return item.type === "spell" && Number(item.level ?? 0) === 0;
   if (filter === "prepared") {
-    if (String(game.system?.id ?? "").toLowerCase() === "pf2e") return item.type === "spell" && item.preparationMode === "prepared" && item.prepared;
+    if (isPaizo2e()) return item.type === "spell" && item.preparationMode === "prepared" && item.prepared;
     return item.type === "spell" && (item.prepared || Number(item.level ?? 0) === 0 || ["always", "atwill", "innate", "pact"].includes(item.preparationMode));
   }
   if (filter === "focus") return item.type === "spell" && (item.pf2e?.traits?.includes("focus") || item.preparationMode === "focus");
@@ -1920,7 +1950,7 @@ function renderActionGroup(title, items = [], adapterId = "") {
   const filtered = filterItemsForView("actions", items);
   if (!filtered.length) return "";
   const loweredTitle = title.toLowerCase();
-  const key = adapterId === "pf2e"
+  const key = adapterIsPaizo2e(adapterId)
     ? (loweredTitle.includes("reaction") ? "reaction"
       : loweredTitle.includes("free") ? "free"
         : loweredTitle.includes("passive") ? "passive"
@@ -1951,7 +1981,7 @@ function renderActionGroup(title, items = [], adapterId = "") {
               </h2>
               <span class="pp-header-count">${escapeHtml(list.length)}</span>
             </div>
-            <div class="pp-card-list">${list.map((item) => renderItemCard(item, { usesInControls: adapterId === "pf2e" || category === "feature" })).join("")}</div>
+            <div class="pp-card-list">${list.map((item) => renderItemCard(item, { usesInControls: adapterIsPaizo2e(adapterId) || category === "feature" })).join("")}</div>
           </div>
         `;
   }).join("")}
@@ -2030,7 +2060,7 @@ function renderCheckGroups(checks = []) {
 
 function spellLevelLabel(level) {
   const n = Number(level ?? 0);
-  if (String(game.system?.id ?? "").toLowerCase() === "pf2e") return Number.isFinite(n) && n > 0 ? `Spell Rank ${n}` : "Cantrips";
+  if (isPaizo2e()) return Number.isFinite(n) && n > 0 ? `Spell Rank ${n}` : "Cantrips";
   return Number.isFinite(n) && n > 0 ? `Spell Level ${n}` : "Cantrips";
 }
 
@@ -2068,7 +2098,7 @@ function renderSpellHeaderSlot(level, slots = [], items = []) {
   }
   const slot = slotForSpellLevel(slots, n);
   if (slot) return renderLevelSlot(slot);
-  if (String(game.system?.id ?? "").toLowerCase() === "pf2e") {
+  if (isPaizo2e()) {
     if (items.some((item) => item.pf2e?.traits?.includes("focus"))) {
       return `<div class="pp-level-slot pp-level-slot-empty"><span>Focus Spells</span><strong>Uses Focus Points</strong></div>`;
     }
@@ -2076,7 +2106,7 @@ function renderSpellHeaderSlot(level, slots = [], items = []) {
       return `<div class="pp-level-slot pp-level-slot-empty"><span>Innate Spells</span><strong>Uses shown per spell</strong></div>`;
     }
   }
-  const rankOrLevel = String(game.system?.id ?? "").toLowerCase() === "pf2e" ? "Rank" : "Spell Level";
+  const rankOrLevel = isPaizo2e() ? "Rank" : "Spell Level";
   return `
     <div class="pp-level-slot pp-level-slot-empty">
       <span>${rankOrLevel} ${escapeHtml(n)}</span>
@@ -2114,7 +2144,7 @@ function renderSpellLevelSections(items = [], slots = [], preparation = null) {
             ` : ""}
             ${renderSpellHeaderSlot(level, slots, list)}
           </div>
-          <div class="pp-card-list">${list.map((item) => renderItemCard(item, { showSpellLevel: false, usesInControls: String(game.system?.id ?? "").toLowerCase() === "pf2e" })).join("")}</div>
+          <div class="pp-card-list">${list.map((item) => renderItemCard(item, { showSpellLevel: false, usesInControls: isPaizo2e() })).join("")}</div>
         </div>
       `;
   }).join("")}
@@ -2165,7 +2195,7 @@ function renderItemCard(item, { showSpellLevel = true, usesInControls = false } 
   if (item?.pf2eStrike) return renderPf2eStrikeCard(item);
   const ready = item.type !== "spell" || item.usable === true;
   const canUse = item.usable !== false;
-  const spellRankOrLevel = String(game.system?.id ?? "").toLowerCase() === "pf2e" ? "Spell Rank" : "Spell Level";
+  const spellRankOrLevel = isPaizo2e() ? "Spell Rank" : "Spell Level";
   const level = showSpellLevel && item.type === "spell" ? renderBadge(Number(item.level ?? 0) > 0 ? `${spellRankOrLevel} ${item.level}` : "Cantrip", "level", "fa-layer-group") : "";
   const preparationLock = item.type === "spell" && item.preparationLocked
     ? `<span class="pp-card-state-icon" title="Always available; cannot be unprepared" aria-label="Always available"><i class="fas fa-lock"></i></span>`
@@ -2913,7 +2943,7 @@ function openUseDialog(itemId, flowOptions = {}) {
   const model = game.playerPilot.model;
   const canUseItem = model.canUseItem(item);
   if (!canUseItem) {
-    const message = model.id === "pf2e" && item.type === "spell"
+    const message = model.usesSpellRanks && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
       : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
     ui.notifications?.warn?.(message);
@@ -2992,7 +3022,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   const model = game.playerPilot.model;
   const canUseItem = model.canUseItem(item);
   if (!canUseItem) {
-    const message = model.id === "pf2e" && item.type === "spell"
+    const message = model.usesSpellRanks && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
       : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
     ui.notifications?.warn?.(message);
@@ -3013,9 +3043,9 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   const playerChoice = model.itemPlayerChoice?.(item);
   const activityStep = activities.length > 1 || !!playerChoice;
   const defaultActivityId = activities[0]?.id ?? "";
-  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : "") : "");
+  const defaultCastLevel = slots[0]?.level ?? (item.type === "spell" ? (model.usesSpellRanks ? model.pf2eSpellRank(item) : "") : "");
   const baseCastLevel = item.type === "spell"
-    ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
+    ? (model.usesSpellRanks ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
     : "";
   const instructions = model.collectRollInstructions?.(item, { castLevel: defaultCastLevel, activityId: defaultActivityId });
   const baseInstructionsFor = (activityId = "") => model.collectRollInstructions?.(item, {
@@ -3028,7 +3058,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   const rangeFeetFor = (activityId = "") => model.getItemRangeFeet?.(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
-  const spellStep = item.type === "spell" && (model.id !== "pf2e" || slots.length > 0);
+  const spellStep = item.type === "spell" && (!model.usesSpellRanks || slots.length > 0);
   clearUseTargets();
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
     if (!sneakAttack) return null;
@@ -3126,11 +3156,11 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     <div class="pp-use-step ${!activityStep && !targetStep && spellStep ? "" : "hidden"}" data-use-step="cast">
       ${concentration ? `<p><strong>${escapeHtml(concentration)}</strong></p>` : ""}
       ${slots.length ? `
-        <label>${model.id === "pf2e" ? "Cast Rank" : "Cast Level"}</label>
+        <label>${model.usesSpellRanks ? "Cast Rank" : "Cast Level"}</label>
         <select class="pp-select" name="castLevel">
           ${slots.map((slot) => `<option value="${slot.level}">${escapeHtml(slot.label)}</option>`).join("")}
         </select>
-      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${model.id === "pf2e" && model.pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${model.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
+      ` : `<div class="pp-cast-level-static"><i class="fas fa-wand-magic-sparkles"></i><strong>${model.usesSpellRanks && model.pf2eIsCantrip(item) ? "Cantrip" : (Number(defaultCastLevel ?? 0) > 0 ? `${model.usesSpellRanks ? "Spell Rank" : "Spell Level"} ${escapeHtml(defaultCastLevel)}` : "Cantrip")}</strong></div>`}
       <div class="pp-cast-preview" data-cast-preview>${renderCastPreview(instructions, defaultCastLevel, model.id, baseInstructionsFor(defaultActivityId), baseCastLevel)}</div>
       ${ammo.length ? `
         <label>Ammo</label>
@@ -3465,7 +3495,7 @@ function previewEffectLabel(entry = {}) {
 
 function renderCastPreview(instructions = [], castLevel = "", adapterId = "", baseInstructions = [], baseCastLevel = "") {
   const effects = instructions.filter((entry) => ["damage", "healing"].includes(entry.kind) && entry.formula);
-  const rankOrLevel = adapterId === "pf2e" ? "Rank" : "Spell Level";
+  const rankOrLevel = adapterIsPaizo2e(adapterId) ? "Rank" : "Spell Level";
   const baseByKey = new Map(baseInstructions.map((entry) => [previewInstructionKey(entry), entry]));
   const selectedLevel = Number(castLevel ?? 0);
   const originalLevel = Number(baseCastLevel ?? 0);
@@ -3495,7 +3525,7 @@ function renderCastPreview(instructions = [], castLevel = "", adapterId = "", ba
       </div>
     </div>
     <div class="pp-cast-preview-title">Spell effect at ${selectedLevel > 0 ? `${rankOrLevel} ${escapeHtml(levelDisplay)}` : escapeHtml(levelDisplay)}</div>
-    ${rows || `<p>This spell can use the selected ${adapterId === "pf2e" ? "rank" : "slot level"}, but its listed damage or healing does not change.</p>`}
+    ${rows || `<p>This spell can use the selected ${adapterIsPaizo2e(adapterId) ? "rank" : "slot level"}, but its listed damage or healing does not change.</p>`}
   `;
 }
 
@@ -3715,7 +3745,7 @@ function renderDiceFormulaIcons(formula) {
 
 function formulaFlatModifier(formula = "") {
   let total = 0;
-  for (const match of String(formula).matchAll(/([+-])\s*(\d+(?:\.\d+)?)(?!\s*[dD*\/])/g)) {
+  for (const match of String(formula).matchAll(/([+-])\s*(\d+(?:\.\d+)?)(?!\s*[dD*/])/g)) {
     const value = Number(match[2]);
     if (!Number.isFinite(value)) continue;
     total += match[1] === "-" ? -value : value;
@@ -3781,6 +3811,7 @@ async function rollFormulaForActor(actor, data = {}) {
     speaker: ChatMessage.getSpeaker({ actor }),
     flavor: String(data.label ?? "Roll")
   });
+  return roll;
 }
 
 function openRollReminderDialog(item, actor, options = {}) {
@@ -3854,7 +3885,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
     return;
   }
   const actor = currentActor();
-  if (!actor || !item || game.playerPilot.model.id !== "pf2e") return;
+  if (!actor || !item || !isPaizo2e()) return;
   const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
   const requestedRank = Number(castRank);
   const requestedAttack = Number(attackNumber);
@@ -3862,6 +3893,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
     actorId: actor.id,
     itemId: item.id,
     nativeAction: String(action ?? ""),
+    rollLabel: `${itemDisplayName(item)} ${capitalizeWords(action || "roll")}`,
     castRank: Number.isFinite(requestedRank) && requestedRank > 0 ? requestedRank : game.playerPilot.model.pf2eSpellRank(item),
     attackNumber: Number.isFinite(requestedAttack) && requestedAttack > 0 ? requestedAttack : 1,
     sceneId: state.scene?.id ?? "",
@@ -3872,7 +3904,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
     return;
   }
   await executePlayerFirst(
-    `PF2e ${payload.nativeAction}`,
+    `${game.playerPilot.model.label} ${payload.nativeAction}`,
     async () => game.playerPilot.model.nativeItemRoll(actor, item, payload.nativeAction, payload),
     "pf2eItemRoll",
     payload
@@ -3889,7 +3921,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   if (!actor || !item) return;
   const canUseItem = game.playerPilot.model.canUseItem(item);
   if (!canUseItem) {
-    const message = game.playerPilot.model.id === "pf2e" && item.type === "spell"
+    const message = game.playerPilot.model.usesSpellRanks && item.type === "spell"
       ? "That spell has no available slot, use, or Focus Point."
       : (item.type === "spell" ? "That spell is not prepared." : "Equip that item before using it.");
     ui.notifications?.warn?.(message);
@@ -3900,6 +3932,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
     sendSocket("useItem", {
       actorId: actor.id,
       itemId,
+      rollLabel: itemDisplayName(item),
       options,
       sceneId: state.scene?.id ?? "",
       targetIds
@@ -3994,6 +4027,13 @@ function openManualRollDialog(data = {}) {
         speaker: ChatMessage.getSpeaker({ actor: currentActor() }),
         content: `<p><strong>${escapeHtml(name)}</strong>: <strong>${escapeHtml(total)}</strong>${(!totalMode && isD20) ? ` <span>(${escapeHtml(raw)} ${escapeHtml(signedMod(mod))})</span>` : ""}</p>`
       });
+      showDiceResult({
+        label: name,
+        total,
+        formula,
+        dice: !totalMode && isD20 ? [{ faces: 20, results: [raw] }] : [],
+        modifier: !totalMode && isD20 ? mod : null
+      });
       showResultToast(`${name}: ${total}`, (!totalMode && isD20) ? `${raw} ${signedMod(mod)}` : formula);
     }
   });
@@ -4027,8 +4067,8 @@ async function updateItemQuantity(itemId, delta) {
 
 async function updatePf2eResource(resource, delta) {
   const actor = currentActor();
-  if (!actor || game.playerPilot.model.id !== "pf2e" || !Number.isFinite(delta) || delta === 0) return;
-  const key = resource === "focus" ? "focus" : "heroPoints";
+  if (!actor || !isPaizo2e() || !Number.isFinite(delta) || delta === 0) return;
+  const key = ["focus", "heroPoints", "resolve"].includes(resource) ? resource : "heroPoints";
   const data = actor.system?.resources?.[key] ?? {};
   const current = Number(data.value ?? 0);
   const max = Number(data.max ?? (key === "heroPoints" ? 3 : current));
@@ -4710,10 +4750,9 @@ function handleMapSnapshotClick(event, node) {
 }
 
 function registerChatCapture() {
-  Hooks.on("createChatMessage", (message) => {
+  Hooks.on("createChatMessage", async (message) => {
     if (!userIsPilot()) return;
-    const actorId = String(message.speaker?.actor ?? "");
-    if (actorId && actorId !== state.actorId) return;
+    await captureChatMessage(message);
     const rolls = Array.isArray(message.rolls) ? message.rolls : [];
     if (rolls.length) {
       const roll = rolls[0];
@@ -4725,6 +4764,14 @@ function registerChatCapture() {
     }
     const content = htmlToPlain(message.content ?? "");
     if (content) addLog(content.slice(0, 60));
+  });
+
+  Hooks.on("updateChatMessage", async (message) => {
+    if (userIsPilot()) await captureChatMessage(message, { scrollToBottom: false });
+  });
+
+  Hooks.on("deleteChatMessage", (message) => {
+    if (userIsPilot()) removeChatMessage(message);
   });
 
   Hooks.on("renderChatMessageHTML", (message, _html, _options) => {
@@ -4775,6 +4822,7 @@ async function handlePlayerSocket(data) {
     return;
   }
   if (data.type === "commandResult") {
+    resolveDiceRequest(data);
     if (data.movement && typeof data.movement === "object") {
       applyMovementToSceneState(data.movement);
       updatePlayerMovementStatus(data.movement, String(data.dir ?? ""));
@@ -4813,6 +4861,7 @@ async function handlePlayerSocket(data) {
 }
 
 const gmProxyTargets = new Map();
+const gmRollContexts = [];
 const gmMapSnapshots = new Map();
 const gmSceneStateSentAt = new Map();
 const gmSceneStateFingerprints = new Map();
@@ -4827,7 +4876,7 @@ async function handleGmSocket(data) {
     return;
   }
   if (game.paused === true && ["targetUpdate", "moveToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
-    sendSocket("commandResult", { targetUserIds: [data.userId], message: "Game paused" });
+    sendSocket("commandResult", { targetUserIds: [data.userId], requestId: data.requestId, message: "Game paused", failed: true });
     return;
   }
   if (data.type === "targetUpdate") {
@@ -4883,27 +4932,27 @@ async function handleGmSocket(data) {
     return;
   }
   if (data.type === "useItem") {
-    await gmRun("Used item", data.userId, () => gmUseItem(data));
+    await gmRun("Used item", data.userId, () => gmUseItem(data), data);
     return;
   }
   if (data.type === "rollCheck") {
-    await gmRun("Rolled", data.userId, () => gmRollCheck(data));
+    await gmRun("Rolled", data.userId, () => gmRollCheck(data), data);
     return;
   }
   if (data.type === "pf2eStrike") {
-    await gmRun(`PF2e ${data.operation ?? "attack"}`, data.userId, () => gmPf2eStrike(data));
+    await gmRun(`${game.playerPilot.model.label} ${data.operation ?? "attack"}`, data.userId, () => gmPf2eStrike(data), data);
     return;
   }
   if (data.type === "pf2eItemRoll") {
-    await gmRun("PF2e item roll", data.userId, () => gmPf2eItemRoll(data));
+    await gmRun(`${game.playerPilot.model.label} item roll`, data.userId, () => gmPf2eItemRoll(data), data);
     return;
   }
   if (data.type === "formulaRoll") {
     await gmRun(data.label || "Rolled", data.userId, async () => {
       const actor = gmActor(data.actorId);
       if (!actor) throw new Error("Actor not found.");
-      await rollFormulaForActor(actor, data);
-    });
+      return rollFormulaForActor(actor, data);
+    }, data);
     return;
   }
   if (data.type === "rest") {
@@ -4935,14 +4984,40 @@ async function handleGmSocket(data) {
   }
 }
 
-async function gmRun(label, userId, fn) {
+async function gmRun(label, userId, fn, request = {}) {
+  const context = request.requestId ? {
+    requestId: String(request.requestId),
+    userId: String(userId ?? ""),
+    actorId: String(request.actorId ?? ""),
+    at: Date.now(),
+    rolls: []
+  } : null;
+  if (context) gmRollContexts.push(context);
   try {
-    await fn();
-    sendSocket("commandResult", { targetUserIds: [userId], message: label });
+    const result = await fn();
+    const summaries = [...rollSummariesFrom(result), ...(context?.rolls ?? [])];
+    const seenRolls = new Set();
+    const rolls = summaries.filter((summary) => {
+      const key = JSON.stringify(summary);
+      if (seenRolls.has(key)) return false;
+      seenRolls.add(key);
+      return true;
+    });
+    sendSocket("commandResult", {
+      targetUserIds: [userId],
+      requestId: context?.requestId,
+      message: label,
+      rolls
+    });
   } catch (err) {
     console.error(`Player Pilot GM command failed: ${label}`, err);
-    sendSocket("commandResult", { targetUserIds: [userId], message: `${label} failed` });
+    sendSocket("commandResult", { targetUserIds: [userId], requestId: context?.requestId, message: `${label} failed`, failed: true });
     ui.notifications?.error?.(`Player Pilot: ${label} failed.`);
+  } finally {
+    if (context) {
+      const index = gmRollContexts.indexOf(context);
+      if (index >= 0) gmRollContexts.splice(index, 1);
+    }
   }
 }
 
@@ -5028,11 +5103,11 @@ function renderGmActionNotice({ requester, actor, item, data }) {
   const isSpell = item.type === "spell";
   const adapterId = game.playerPilot.model.id;
   const selectedLevel = Number(data.options?.castLevel ?? 0);
-  const baseLevel = adapterId === "pf2e" ? Number(game.playerPilot.model.pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
+  const baseLevel = adapterIsPaizo2e(adapterId) ? Number(game.playerPilot.model.pf2eSpellRank(item) ?? 0) : Number(item.system?.level ?? 0);
   const castLevel = selectedLevel > 0 ? selectedLevel : baseLevel;
-  const isCantrip = adapterId === "pf2e" ? game.playerPilot.model.pf2eIsCantrip(item) : baseLevel <= 0;
+  const isCantrip = adapterIsPaizo2e(adapterId) ? game.playerPilot.model.pf2eIsCantrip(item) : baseLevel <= 0;
   const levelText = isSpell ? (isCantrip ? "Cantrip" : String(castLevel)) : "";
-  const levelLabel = adapterId === "pf2e" ? "Rank" : "Level";
+  const levelLabel = adapterIsPaizo2e(adapterId) ? "Rank" : "Level";
   const targets = actionNoticeTargets(data, item, actor);
   const targetText = compactTargetText(targets, 4);
   const playerChoice = String(data.options?.playerChoice ?? "").trim();
@@ -5079,7 +5154,7 @@ async function gmUseItem(data) {
   const notice = renderGmActionNotice({ requester, actor, item, data });
   const toastParts = [
     `${requester}: ACTION ${item.name}`,
-    notice.levelText ? `${game.playerPilot.model.id === "pf2e" ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
+    notice.levelText ? `${game.playerPilot.model.usesSpellRanks ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
     `TARGET ${compactTargetText(notice.targets)}`
   ].filter(Boolean);
   ui.notifications?.info?.(toastParts.join("  |  "));
@@ -5095,18 +5170,18 @@ async function gmUseItem(data) {
       }
     }
   });
-  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
+  return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
 }
 
 async function gmRollCheck(data) {
   const actor = gmActor(data.actorId);
   if (!actor) throw new Error("Actor not found.");
-  await game.playerPilot.model.rollCheck(actor, data.kind, data.key);
+  return game.playerPilot.model.rollCheck(actor, data.kind, data.key);
 }
 
 async function gmPf2eStrike(data) {
   const actor = gmActor(data.actorId);
-  if (!actor || game.playerPilot.model.id !== "pf2e") throw new Error("PF2e actor not found.");
+  if (!actor || !isPaizo2e()) throw new Error(`${game.playerPilot.model.label} actor not found.`);
   if (Array.isArray(data.targetIds)) {
     gmProxyTargets.set(String(data.userId), {
       actorId: data.actorId,
@@ -5115,13 +5190,13 @@ async function gmPf2eStrike(data) {
       at: Date.now()
     });
   }
-  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.executeStrike(actor, data));
+  return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.executeStrike(actor, data));
 }
 
 async function gmPf2eItemRoll(data) {
   const actor = gmActor(data.actorId);
   const item = actor?.items?.get?.(data.itemId);
-  if (!actor || !item || game.playerPilot.model.id !== "pf2e") throw new Error("PF2e actor or item not found.");
+  if (!actor || !item || !isPaizo2e()) throw new Error(`${game.playerPilot.model.label} actor or item not found.`);
   if (Array.isArray(data.targetIds)) {
     gmProxyTargets.set(String(data.userId), {
       actorId: data.actorId,
@@ -5130,7 +5205,7 @@ async function gmPf2eItemRoll(data) {
       at: Date.now()
     });
   }
-  await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.nativeItemRoll(actor, item, data.nativeAction, data));
+  return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.nativeItemRoll(actor, item, data.nativeAction, data));
 }
 
 function gmRest(data) {
@@ -5959,6 +6034,8 @@ function createSystemModel() {
     game.playerPilot.model = new DnD5eModel();
   } else if (game.system.id == "pf2e") {
     game.playerPilot.model = new PF2eModel();
+  } else if (game.system.id == "sf2e") {
+    game.playerPilot.model = new SF2eModel();
   } else if (game.system.id == "swade") {
     game.playerPilot.model = new SwadeModel();
   } else {
@@ -5972,6 +6049,32 @@ function createSystemModel() {
 }
 
 function registerHooks() {
+  Hooks.on("preCreateChatMessage", (message, data) => {
+    if (!game.user?.isGM || !gmRollContexts.length) return;
+    const actorId = String(data?.speaker?.actor ?? message?.speaker?.actor ?? "");
+    const context = [...gmRollContexts].reverse().find((candidate) => !actorId || !candidate.actorId || candidate.actorId === actorId);
+    if (!context) return;
+    message.updateSource({
+      flags: {
+        ...(message.flags ?? {}),
+        [MODULE_ID]: {
+          ...(message.flags?.[MODULE_ID] ?? {}),
+          rollRequestId: context.requestId,
+          requestingUserId: context.userId
+        }
+      }
+    });
+  });
+  Hooks.on("createChatMessage", (message) => {
+    if (!game.user?.isGM || !gmRollContexts.length || !message?.rolls?.length) return;
+    const requestId = String(message.getFlag?.(MODULE_ID, "rollRequestId") ?? "");
+    const actorId = String(message.speaker?.actor ?? "");
+    const context = [...gmRollContexts].reverse().find((candidate) => (
+      (requestId && candidate.requestId === requestId)
+      || (!requestId && (!actorId || !candidate.actorId || candidate.actorId === actorId))
+    ));
+    if (context) context.rolls.push(...rollSummariesFrom(message.rolls));
+  });
   Hooks.on("renderUserConfig", closePilotUserConfiguration);
   Hooks.on("renderApplicationV2", closePilotUserConfiguration);
   Hooks.on("renderApplicationV2", surfacePilotPrompt);
@@ -6014,7 +6117,17 @@ function registerHooks() {
     if (userIsPilot()) setBootStage(90, "Finishing character data...", 95);
     game.socket?.on?.(SOCKET, handleSocket);
     if (userIsPilot()) {
+      configureDiceOverlay({ getActorId: () => state.actorId });
+      configureChatFeed({
+        onChange: ({ scrollToBottom = false } = {}) => {
+          state.chatScrollToBottom ||= scrollToBottom;
+          if (state.activeTab === "chat") queueRender();
+        },
+        onRollMessage: captureDiceRollMessage
+      });
       registerChatCapture();
+      await hydrateChatFeed();
+      exposeDiceApi();
       installAudioSuppression();
     }
     installChatModeBridge();
@@ -6042,6 +6155,9 @@ function registerHooks() {
 
   Hooks.on("pauseGame", () => {
     if (userIsPilot()) queueRender();
+  });
+  Hooks.on("updateUser", () => {
+    if (userIsPilot() && state.activeTab === "chat") queueRender();
   });
   Hooks.on("updateActor", (actor) => {
     if (userIsPilot() && String(actor?.id ?? "") === String(state.actorId ?? "")) {

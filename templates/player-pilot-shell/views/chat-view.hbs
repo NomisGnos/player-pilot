@@ -1,0 +1,34 @@
+<main class="pp-body pp-chat-body">
+  <section class="pp-view pp-chat-view tab {{#if (eq activeTab.key 'chat')}}active{{/if}}" data-tab="chat">
+    <header class="pp-chat-heading">
+      <span>Chat</span>
+    </header>
+
+    <div class="pp-chat-feed" data-chat-feed aria-live="polite">
+      {{#if chatHasMessages}}
+        {{#each chatMessages as |message|}}
+          <div class="pp-chat-message" data-message-id="{{message.id}}">{{{message.html}}}</div>
+        {{/each}}
+      {{else}}
+        <div class="pp-chat-empty">
+          <i class="fas fa-comments"></i>
+          <strong>No messages yet</strong>
+          <span>New table messages will appear here.</span>
+        </div>
+      {{/if}}
+    </div>
+
+    <form class="pp-chat-composer" data-chat-composer autocomplete="off">
+      <label for="pp-chat-recipient">Send to</label>
+      <select id="pp-chat-recipient" class="pp-select" name="recipient" aria-label="Chat recipient">
+        {{#each chatRecipients as |recipient|}}
+          <option value="{{recipient.value}}" {{#if recipient.selected}}selected{{/if}} {{#if recipient.disabled}}disabled{{/if}}>{{recipient.label}}</option>
+        {{/each}}
+      </select>
+      <textarea name="message" rows="2" maxlength="2000" placeholder="Message the table..." aria-label="Chat message">{{chatDraft}}</textarea>
+      <button class="pp-button primary" type="submit">
+        <i class="fas fa-paper-plane"></i><span>Send</span>
+      </button>
+    </form>
+  </section>
+</main>

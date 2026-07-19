@@ -1,8 +1,8 @@
 {
   "id": "player-pilot",
   "title": "Player Pilot",
-  "description": "Mobile-first player controls for Foundry VTT: actor actions, spells, features, token movement, targeting, map pings, rests, and table-facing requests.",
-  "version": "0.2.18",
+  "description": "Mobile-first player controls for Foundry VTT: actor actions, spells, chat, animated dice, token movement, targeting, map pings, rests, and table-facing requests.",
+  "version": "0.3.0",
   "authors": [
     {
       "name": "Simon Song",
@@ -42,7 +42,7 @@
   "socket": true,
   "url": "https://github.com/NomisGnos/player-pilot",
   "manifest": "https://github.com/NomisGnos/player-pilot/releases/latest/download/module.json",
-  "download": "https://github.com/NomisGnos/player-pilot/releases/download/0.2.18/module.zip",
+  "download": "https://github.com/NomisGnos/player-pilot/releases/download/0.3.0/module.zip",
   "readme": "https://github.com/NomisGnos/player-pilot/blob/main/README.md",
   "bugs": "https://github.com/NomisGnos/player-pilot/issues",
   "changelog": "https://github.com/NomisGnos/player-pilot/blob/main/CHANGELOG.md"

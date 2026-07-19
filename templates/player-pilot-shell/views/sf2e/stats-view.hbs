@@ -1,0 +1,87 @@
+<main class="pp-body">
+  <section class="pp-view pp-stats-page pp-system-sf2e tab {{#if (eq activeTab.key 'stats')}}active{{/if}}" data-tab="stats">
+    <div class="pp-section">
+      {{>"modules/player-pilot/templates/player-pilot-shell/partials/section-header.hbs" sectionHeader=activeTab.sectionHeader count=model.label}}
+
+      <div class="pp-hp-panel pp-compact-card">
+        <div class="pp-hp-copy">
+          <span><i class="fas fa-heart-pulse"></i> HP</span>
+          <strong>{{summary.hp.display}}</strong>
+          {{#if summary.hp.temp}}<em>Temporary {{summary.hp.temp}}</em>{{/if}}
+        </div>
+        <div class="pp-hp-track" aria-label="Hit points">
+          <div class="pp-hp-fill" style="width:{{summary.hp.pct}}%"></div>
+          {{#if summary.hp.temp}}<div class="pp-hp-temp" style="width:{{summary.hp.tempWidth}}%"></div>{{/if}}
+        </div>
+      </div>
+
+      {{#if summary.stamina}}
+        <div class="pp-hp-panel pp-compact-card pp-sf2e-stamina-panel">
+          <div class="pp-hp-copy">
+            <span><i class="fas fa-battery-three-quarters"></i> Stamina</span>
+            <strong>{{summary.stamina.display}}</strong>
+          </div>
+          <div class="pp-hp-track" aria-label="Stamina points">
+            <div class="pp-hp-fill pp-sf2e-stamina-fill" style="width:{{summary.stamina.pct}}%"></div>
+          </div>
+        </div>
+      {{/if}}
+
+      <div class="pp-initiative-strip">
+        <i class="fas fa-flag-checkered"></i><span>Initiative Modifier</span><strong>{{summary.initiative}}</strong>
+        <button class="pp-initiative-roll" type="button" data-action="rollInitiative" title="{{initiativeRollText}}">{{{d20Icon}}}</button>
+      </div>
+
+      <div class="pp-status-grid">
+        {{#each statCards}}{{>"modules/player-pilot/templates/player-pilot-shell/partials/stat-card.hbs" this}}{{/each}}
+      </div>
+
+      <div class="pp-detail-strips">
+        <div class="pp-detail-strip pp-pf2e-resource-strip">
+          <i class="fas fa-star"></i><span>Hero Points</span>
+          <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="-1" title="Spend a Hero Point"><i class="fas fa-minus"></i></button>
+          <strong>{{summary.heroPointsValue}} / {{summary.heroPointsMax}}</strong>
+          <button type="button" data-action="pf2e-resource" data-resource="heroPoints" data-delta="1" title="Gain a Hero Point"><i class="fas fa-plus"></i></button>
+        </div>
+        {{#if summary.focusMax}}
+          <div class="pp-detail-strip pp-pf2e-resource-strip">
+            <i class="fas fa-bullseye"></i><span>Focus Points</span>
+            <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="-1" title="Spend a Focus Point"><i class="fas fa-minus"></i></button>
+            <strong>{{summary.focusValue}} / {{summary.focusMax}}</strong>
+            <button type="button" data-action="pf2e-resource" data-resource="focus" data-delta="1" title="Recover a Focus Point"><i class="fas fa-plus"></i></button>
+          </div>
+        {{/if}}
+        {{#if summary.resolve}}
+          <div class="pp-detail-strip pp-pf2e-resource-strip">
+            <i class="fas fa-shield-heart"></i><span>Resolve Points</span>
+            <button type="button" data-action="pf2e-resource" data-resource="resolve" data-delta="-1" title="Spend a Resolve Point"><i class="fas fa-minus"></i></button>
+            <strong>{{summary.resolve.value}} / {{summary.resolve.max}}</strong>
+            <button type="button" data-action="pf2e-resource" data-resource="resolve" data-delta="1" title="Recover a Resolve Point"><i class="fas fa-plus"></i></button>
+          </div>
+        {{/if}}
+        <div class="pp-pf2e-condition-panel">
+          <div class="pp-pf2e-condition-values">
+            <span><i class="fas fa-heart-crack"></i><b>Dying</b><strong>{{summary.dyingValue}} / {{summary.dyingMax}}</strong></span>
+            <span><i class="fas fa-bandage"></i><b>Wounded</b><strong>{{summary.woundedValue}} / {{summary.woundedMax}}</strong></span>
+            <span><i class="fas fa-skull"></i><b>Doomed</b><strong>{{summary.doomedValue}} / {{summary.doomedMax}}</strong></span>
+          </div>
+          <button class="pp-action-btn" type="button" data-action="roll-check" data-kind="recovery" data-key="recovery" {{#unless summary.dyingValue}}disabled{{/unless}}>
+            Recovery Check{{#if summary.dyingValue}} (DC {{summary.recoveryDc}}){{/if}}
+          </button>
+          <small>These values mirror SF2e conditions. Recovery checks are available only while Dying.</small>
+        </div>
+      </div>
+
+      <div class="pp-ability-grid">
+        {{#each summary.abilities}}
+          <div class="pp-ability-score">
+            <span class="pp-ability-label"><i class="fas {{icon}}"></i><span>{{label}}</span></span>
+            <strong>{{score}}</strong><em><small>Modifier</small>{{mod}}</em>
+          </div>
+        {{/each}}
+      </div>
+
+      <div class="pp-rest-row"><button class="pp-button" type="button" data-action="pf2eRest" data-rest="night">Rest for the Night</button></div>
+    </div>
+  </section>
+</main>

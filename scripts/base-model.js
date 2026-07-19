@@ -6,6 +6,7 @@ export class BaseModel {
 
   static id = "base";
   static label = "Generic";
+  static rulesFamily = "generic";
 
   get id() {
     return this.constructor.id;
@@ -13,6 +14,14 @@ export class BaseModel {
 
   get label() {
     return this.constructor.label;
+  }
+
+  get rulesFamily() {
+    return this.constructor.rulesFamily;
+  }
+
+  get usesSpellRanks() {
+    return false;
   }
 
   summary = {};
@@ -49,6 +58,18 @@ export class BaseModel {
       label: "Inventory",
       icon: "fa-sack-xmark",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/inventory-view.hbs",
+    },
+    {
+      key: "chat",
+      label: "Chat",
+      icon: "fa-comments",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/chat-view.hbs",
+    },
+    {
+      key: "dice",
+      label: "Dice",
+      icon: "fa-dice-d20",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dice-view.hbs",
     },
     {
       key: "map",

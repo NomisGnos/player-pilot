@@ -8,8 +8,11 @@ import {
   rollCheck,
   selectedQuickFilters,
   setting,
+  showResultToast,
   state,
 } from "./player-pilot.js";
+import { chatViewContext, sendPlayerChat, setChatDraft, setChatRecipient } from "./chat-feed.js";
+import { diceViewContext, previewDiceTheme, saveDiceSettings } from "./dice-overlay.js";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) {
@@ -55,6 +58,20 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       },
       rollCheck: async function (_event, button) {
         await rollCheck(button.dataset.kind ?? "", button.dataset.key ?? "");
+      },
+      saveDiceSettings: async function (event, button) {
+        event.preventDefault();
+        const form = button.closest("form");
+        if (!form) return;
+        await saveDiceSettings(form);
+        showResultToast("Player dice updated");
+        this.render(true);
+      },
+      previewDice: async function (event, button) {
+        event.preventDefault();
+        const form = button.closest("form");
+        if (form) await saveDiceSettings(form);
+        previewDiceTheme();
       }
     },
   };
@@ -69,6 +86,11 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
   constructor(options = {}) {
     super(options);
     this._onShellScroll = this.updateScrollTopButton.bind(this);
+    this._onChatSubmit = this.handleChatSubmit.bind(this);
+    this._onChatKeydown = this.handleChatKeydown.bind(this);
+    this._onChatInput = this.handleChatInput.bind(this);
+    this._onChatRecipientChange = this.handleChatRecipientChange.bind(this);
+    this._onDicePlayerColorChange = this.handleDicePlayerColorChange.bind(this);
     this._scrollListenerElement = null;
   }
 
@@ -78,7 +100,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const ownedActors = game.actors.filter(a => a.isOwner);
     this.currentActor = this.getCurrentActor(ownedActors);
 
-    if (this.currentActor) {
+    if (this.currentActor || ["chat", "dice"].includes(state.activeTab)) {
       const activeTab = game.playerPilot.model.getTab(state.activeTab);
       parts.body.template = activeTab.viewTemplate;
     } else {
@@ -115,7 +137,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       activeTab = model.getTab(state.activeTab);
     }
 
-    const initiativeRollText = model.id === "pf2e" ? "Choose an initiative skill and roll" : "Roll initiative";
+    const initiativeRollText = model.usesSpellRanks ? "Choose an initiative skill and roll" : "Roll initiative";
 
     const activeFilter = model.quickFilterFor(state.activeTab);
     const selectedFilters = new Set(model.selectedQuickFilters(state.activeTab));
@@ -136,6 +158,8 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       initiativeRollText,
       d20Icon: renderDieGlyph(20),
       statCards: model.summary.statCards,
+      ...chatViewContext(),
+      ...diceViewContext(),
     };
   }
 
@@ -152,12 +176,74 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
     this.updateScrollTopButton();
     applySearchFilter();
+    const chatForm = this.element.querySelector("[data-chat-composer]");
+    chatForm?.addEventListener("submit", this._onChatSubmit);
+    chatForm?.querySelector("textarea")?.addEventListener("keydown", this._onChatKeydown);
+    chatForm?.querySelector("textarea")?.addEventListener("input", this._onChatInput);
+    chatForm?.querySelector("select[name='recipient']")?.addEventListener("change", this._onChatRecipientChange);
+    const diceForm = this.element.querySelector(".pp-dice-settings-page");
+    diceForm?.querySelector("[name='usePlayerColor']")?.addEventListener("change", this._onDicePlayerColorChange);
+    this.syncDiceColorLock(diceForm);
+    if (state.activeTab === "chat" && state.chatScrollToBottom) {
+      state.chatScrollToBottom = false;
+      window.requestAnimationFrame(() => {
+        const feed = this.element.querySelector("[data-chat-feed]");
+        if (feed) feed.scrollTop = feed.scrollHeight;
+      });
+    }
   }
 
   _onClose(options) {
     this._scrollListenerElement?.removeEventListener("scroll", this._onShellScroll, true);
     this._scrollListenerElement = null;
     return super._onClose(options);
+  }
+
+  async handleChatSubmit(event) {
+    event.preventDefault();
+    await this.sendChatFromForm(event.currentTarget);
+  }
+
+  handleChatKeydown(event) {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.closest("form")?.requestSubmit?.();
+  }
+
+  handleChatInput(event) {
+    setChatDraft(event.currentTarget.value);
+  }
+
+  handleChatRecipientChange(event) {
+    setChatRecipient(event.currentTarget.value);
+  }
+
+  handleDicePlayerColorChange(event) {
+    this.syncDiceColorLock(event.currentTarget.closest("form"));
+  }
+
+  syncDiceColorLock(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const checkbox = form.querySelector("[name='usePlayerColor']");
+    const color = form.querySelector("[name='diceColor']");
+    const lock = form.querySelector("[data-dice-color-lock]");
+    const locked = checkbox?.checked === true;
+    if (color instanceof HTMLInputElement) {
+      color.disabled = locked;
+      color.ariaDisabled = String(locked);
+      if (locked && /^#[0-9a-f]{6}$/i.test(color.dataset.playerColor ?? "")) color.value = color.dataset.playerColor;
+    }
+    if (lock instanceof HTMLElement) lock.hidden = !locked;
+  }
+
+  async sendChatFromForm(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const textarea = form.querySelector("textarea[name='message']");
+    const recipient = form.querySelector("select[name='recipient']")?.value ?? "everyone";
+    const sent = await sendPlayerChat({ text: textarea?.value, recipient, actor: this.currentActor });
+    if (!sent || !(textarea instanceof HTMLTextAreaElement)) return;
+    textarea.value = "";
+    textarea.focus();
   }
 
   getCurrentActor(ownedActors) {
@@ -176,6 +262,6 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     //TODO: Add scroll to top button
     const body = this.element.querySelector(".pp-body");
     const button = this.element.querySelector(".pp-scroll-top");
-    button?.classList.toggle("visible", body.scrollTop > 280);
+    button?.classList.toggle("visible", (body?.scrollTop ?? 0) > 280);
   }
 }

@@ -74,9 +74,9 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     this.activityStep = this.activities.length > 1 || !!this.playerChoice;
     this.defaultActivityId = this.activities[0]?.id ?? "";
     this.defaultCastLevel = this.slots[0]?.level
-      ?? (item.type === "spell" ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : "") : "");
+      ?? (item.type === "spell" ? (model.usesSpellRanks ? model.pf2eSpellRank(item) : "") : "");
     this.baseCastLevel = item.type === "spell"
-      ? (model.id === "pf2e" ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
+      ? (model.usesSpellRanks ? model.pf2eSpellRank(item) : Number(item.system?.level ?? 0))
       : "";
     this.instructions = this.collectInstructions({
       castLevel: this.defaultCastLevel,
@@ -87,7 +87,7 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       : null;
     this.targetInfo = this.targetInfoFor(this.defaultActivityId);
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
-    this.spellStep = item.type === "spell" && (model.id !== "pf2e" || this.slots.length > 0);
+    this.spellStep = item.type === "spell" && (!model.usesSpellRanks || this.slots.length > 0);
     services.clearUseTargets();
   }
 
@@ -119,9 +119,9 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   staticCastLabel() {
-    if (this.model.id === "pf2e" && this.model.pf2eIsCantrip(this.item)) return "Cantrip";
+    if (this.model.usesSpellRanks && this.model.pf2eIsCantrip(this.item)) return "Cantrip";
     if (Number(this.defaultCastLevel ?? 0) > 0) {
-      return `${this.model.id === "pf2e" ? "Spell Rank" : "Spell Level"} ${this.defaultCastLevel}`;
+      return `${this.model.usesSpellRanks ? "Spell Rank" : "Spell Level"} ${this.defaultCastLevel}`;
     }
     return "Cantrip";
   }
@@ -154,7 +154,7 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       }, "data-action"),
       spellStep: this.spellStep,
       concentration: this.concentration,
-      isPf2e: this.model.id === "pf2e",
+      isPf2e: this.model.usesSpellRanks,
       slots: this.slots,
       defaultCastLevel: this.defaultCastLevel,
       staticCastLabel: this.staticCastLabel(),

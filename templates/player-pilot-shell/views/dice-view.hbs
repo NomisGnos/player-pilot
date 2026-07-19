@@ -1,0 +1,39 @@
+<main class="pp-body">
+  <section class="pp-view pp-dice-settings-view tab {{#if (eq activeTab.key 'dice')}}active{{/if}}" data-tab="dice">
+    <header class="pp-dice-page-heading">
+      <i class="fas fa-dice-d20"></i>
+      <div>
+        <span>Player Dice</span>
+        <small>Lightweight, faceted dice without requiring the Foundry canvas.</small>
+      </div>
+    </header>
+
+    <form class="pp-dice-settings pp-dice-settings-page" autocomplete="off">
+      <label for="pp-dice-animation">Animation</label>
+      <select id="pp-dice-animation" class="pp-select" name="diceAnimationMode">
+        <option value="automatic" {{#if (eq diceMode 'automatic')}}selected{{/if}}>Automatic</option>
+        <option value="lightweight" {{#if (eq diceMode 'lightweight')}}selected{{/if}}>Always use Player Pilot dice</option>
+        <option value="off" {{#if (eq diceMode 'off')}}selected{{/if}}>Off</option>
+      </select>
+
+      <label for="pp-dice-theme">Style</label>
+      <select id="pp-dice-theme" class="pp-select" name="diceTheme">
+        {{#each diceThemes as |theme|}}
+          <option value="{{theme.id}}" {{#if theme.selected}}selected{{/if}}>{{theme.label}}</option>
+        {{/each}}
+      </select>
+
+      <label for="pp-dice-color">Dice color</label>
+      <div class="pp-dice-color-row">
+        <input id="pp-dice-color" type="color" name="diceColor" value="{{diceColor}}" data-player-color="{{dicePlayerColor}}" {{#if diceUsesPlayerColor}}disabled{{/if}}>
+        <span class="pp-dice-color-lock" data-dice-color-lock title="Using Foundry player color" aria-label="Using Foundry player color" {{#unless diceUsesPlayerColor}}hidden{{/unless}}><i class="fas fa-lock"></i></span>
+      </div>
+      <label class="pp-checkbox-row"><input type="checkbox" name="usePlayerColor" {{#if diceUsesPlayerColor}}checked{{/if}}> Match my Foundry player color</label>
+
+      <div class="pp-dialog-actions">
+        <button class="pp-button" type="button" data-action="previewDice"><i class="fas fa-play"></i> Preview</button>
+        <button class="pp-button primary" type="button" data-action="saveDiceSettings"><i class="fas fa-floppy-disk"></i> Save</button>
+      </div>
+    </form>
+  </section>
+</main>

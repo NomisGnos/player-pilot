@@ -55,6 +55,11 @@ export class PF2eModel extends BaseModel {
 
   static id = "pf2e";
   static label = "PF2e";
+  static rulesFamily = "paizo2e";
+
+  get usesSpellRanks() {
+    return true;
+  }
 
   static TABS = mergeTabs(BaseModel.TABS, [
     {
@@ -68,6 +73,8 @@ export class PF2eModel extends BaseModel {
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },
+    { key: "chat" },
+    { key: "dice" },
     { key: "map" },
   ]);
 
@@ -750,9 +757,10 @@ export class PF2eModel extends BaseModel {
     const description = htmlToPlain(item.system.description?.value ?? item.system.description ?? "").toLowerCase();
     const asksForSkill = name === "guidance"
       || /\b(?:choose|select)\b.{0,80}\b(?:skill|ability check)\b/i.test(description);
+    const systemConfig = CONFIG?.[String(game.system?.id ?? "pf2e").toUpperCase()] ?? CONFIG?.PF2E ?? {};
     if (asksForSkill) {
       const skills = Object.entries(actor.system.skills ?? {}).map(([key, skill]) => {
-        const label = fieldText(skill?.label, CONFIG?.DND5E?.skills?.[key]?.label, CONFIG?.DND5E?.skills?.[key], key.toUpperCase());
+        const label = fieldText(skill?.label, systemConfig.skills?.[key]?.label, systemConfig.skills?.[key], key.toUpperCase());
         return { value: label, label };
       });
       if (skills.length) return {
@@ -763,8 +771,9 @@ export class PF2eModel extends BaseModel {
     }
     const asksForAbility = /\b(?:choose|select)\b.{0,80}\bability\b/i.test(description);
     if (asksForAbility) {
-      const abilities = Object.entries(CONFIG?.DND5E?.abilities ?? {}).map(([key, ability]) => {
-        const label = fieldText(ability?.label, ability, key.toUpperCase());
+      const abilitySource = actor.system.abilities ?? systemConfig.abilities ?? {};
+      const abilities = Object.entries(abilitySource).map(([key, ability]) => {
+        const label = fieldText(ability?.label, systemConfig.abilities?.[key]?.label, systemConfig.abilities?.[key], key.toUpperCase());
         return { value: label, label };
       });
       if (abilities.length) return {
@@ -1172,6 +1181,7 @@ export class PF2eModel extends BaseModel {
       strikeSlug: String(data.strikeSlug ?? ""),
       variantIndex: Number(data.variantIndex ?? 0),
       operation,
+      rollLabel: `${itemDisplayName(actor.items?.get?.(String(data.itemId ?? "")) ?? { name: data.strikeSlug || "Strike" })} ${capitalizeWords(operation)}`,
       sceneId: state.scene?.id ?? "",
       targetIds
     };
@@ -1180,7 +1190,7 @@ export class PF2eModel extends BaseModel {
       return;
     }
     await executePlayerFirst(
-      `PF2e ${payload.operation}`,
+      `${this.label} ${payload.operation}`,
       async () => this.executeStrike(actor, payload),
       "pf2eStrike",
       payload

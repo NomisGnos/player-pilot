@@ -82,6 +82,8 @@ export class DnD5eModel extends BaseModel {
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },
+    { key: "chat" },
+    { key: "dice" },
     { key: "map" },
   ]);
 

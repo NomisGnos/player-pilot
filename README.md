@@ -3,14 +3,13 @@
 [![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v13--v14.363-orange?style=for-the-badge)](https://foundryvtt.com/)
 [![D&D5e](https://img.shields.io/badge/D%26D5e-native-red?style=for-the-badge)](https://foundryvtt.com/packages/dnd5e)
 [![PF2e](https://img.shields.io/badge/PF2e-native-blue?style=for-the-badge)](https://foundryvtt.com/packages/pf2e)
+[![SF2e](https://img.shields.io/badge/SF2e-native-6f42c1?style=for-the-badge)](https://foundryvtt.com/packages/sf2e)
 [![SWADE](https://img.shields.io/badge/SWADE-native-blue?style=for-the-badge)](https://foundryvtt.com/packages/swade)
 [![Patreon](https://img.shields.io/badge/Patreon-drop%20a%20goodberry-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/nomisDM)
 
 Player Pilot is a mobile-first character control module for Foundry VTT.
 
 It is meant for players using a phone or tablet at the table. Players still log in through the normal Foundry page. Once they are logged in, Player Pilot gives selected users a clean character interface for actions, spells, features, inventory, rests, token movement, action targeting, and map pings.
-
-Sheet Sidekick can stay installed for older worlds or reference. Player Pilot is a new module with a new UI and cleaner internals.
 
 ## Installation
 
@@ -60,6 +59,8 @@ The shell has tabs for:
 - `Spells`: actor spells, grouped from the system item data.
 - `Features`: class features, feats, actions, and similar actor abilities.
 - `Inventory`: inventory items, equipment, consumables, tools, and weapons.
+- `Chat`: safe, noninteractive chat history plus public, GM, and direct-message input for online users.
+- `Dice`: lightweight dice appearance, color, animation, and preview controls.
 - `Controls`: token movement, token pings, and Ping On Map snapshots.
 
 ## What Works Now
@@ -69,6 +70,9 @@ The shell has tabs for:
 - HP, AC, system-native speed breakdowns, level, initiative, and system-specific character resources.
 - D&D5e exhaustion and death-save controls.
 - PF2e Hero Points, Focus Points, Dying, Wounded, Doomed, recovery DC, and Recovery Check controls.
+- SF2e-specific views with shared PF2e-family actions, spell ranks, Strikes, and Starfinder stamina display.
+- Player chat to everyone, all online GMs, or one online user; rendered HTML cards are visible but deliberately inert.
+- Large player-colored dice that roll while GM-authoritative actions are pending and settle on the returned result with dice and modifier breakdowns.
 - D&D5e-focused item use through `item.use()` when available.
 - PF2e-native actions, reactions, free actions, feats, and consumable use.
 - PF2e-native Strikes with multiple-attack variants, damage, critical damage, and target proxying.
@@ -98,6 +102,24 @@ The shell has tabs for:
 - Items inside containers are grouped by container name when the system data exposes that link.
 - Optional shared journal and image popups for enabled Player Pilot users.
 - Optional player audio suppression.
+
+## Dice Themes
+
+Players choose an animation mode, style, and color from the dedicated Dice tab. Each standard die uses its own faceted silhouette, while an empty custom color follows the user's Foundry player color and Player Pilot automatically chooses a high-contrast number color.
+
+Modules can add CSS, image, or SVG-backed styles without changing Player Pilot:
+
+```js
+Hooks.on("playerPilotRegisterDiceThemes", (dice) => {
+  dice.registerTheme("nebula", {
+    label: "Nebula",
+    className: "my-nebula-dice",
+    image: "modules/my-module/assets/nebula-die.svg"
+  });
+});
+```
+
+For fully custom markup, a theme can provide `renderDie(context)` and return an `HTMLElement`.
 - Optional no-canvas mode for enabled players.
 - A branded startup screen showing the active system logo and world title, including a note that the display may briefly go blank while Foundry loads.
 
