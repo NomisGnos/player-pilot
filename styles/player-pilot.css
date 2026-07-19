@@ -512,7 +512,7 @@ body.player-pilot-active #pause {
 
 .pp-stat.level,
 .pp-stat.rank,
-.pp-stat.bennies,
+.pp-stat.conviction,
 .pp-stat.prof {
   box-shadow: inset 3px 0 0 var(--pp-good);
 }
@@ -1560,13 +1560,17 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
 
 .pp-statuses-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(max-content, 1fr));
   gap: 7px;
   color: var(--pp-text);
   background: #151d24;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 4px;
   padding: 6px 8px;
+}
+
+.pp-statuses-grid label {
+  white-space: nowrap;
 }
 
 .pp-bennies-controls {

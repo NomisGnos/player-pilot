@@ -180,6 +180,7 @@ export class SwadeModel extends BaseModel {
     this.summary.armor = system.stats.toughness.armor;
     this.summary.bennies = system.bennies;
     this.summary.bennyImage = game.settings.get('swade', 'bennyImageSheet');
+    this.summary.conviction = system.details.conviction?.value;
 
     this.refreshStatCards();
   }
@@ -197,7 +198,7 @@ export class SwadeModel extends BaseModel {
 
     //Combine the paces we have into a single string separated by |
     //We create a new line after every second pace to better control the word wrapping
-    return new Handlebars.SafeString(entries.map(([type, pace], i, arr) => {
+    this.summary.pace = new Handlebars.SafeString(entries.map(([type, pace], i, arr) => {
       const label = localize(`SWADE.Movement.Pace.${capitalizeWords(type)}.Label`);
       const text = `${label} ${Number(pace)}`;
       if (i === arr.length - 1) return text;
@@ -221,13 +222,12 @@ export class SwadeModel extends BaseModel {
       { key: "toughness", icon: "fa-shield", label: "Toughness", value: `${this.summary.toughness}(${this.summary.armor})` },
     ];
 
-    if (this.summary.bennies.value || this.summary.bennies.max) {
+    if (game.settings.get("swade", "enableConviction")) {
       this.summary.statCards.push({
-        key: "bennies",
-        icon: this.summary.bennyImage,
-        label: "Bennies",
-        bennyValue: this.summary.bennies.value,
-        controls: "modules/player-pilot/templates/player-pilot-shell/partials/benny-controls.hbs"
+        key: "conviction",
+        icon: "fa-hand-fist",
+        label: "Conviction",
+        value: this.summary.conviction,
       });
     }
   }
