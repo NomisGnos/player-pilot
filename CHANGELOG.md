@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.1
+- Kept each formula AUTO result beside its AUTO/RE-ROLL control so players can refer back to the last total.
+- Added non-blocking out-of-turn warnings using the GM's active-combat snapshot, while continuing to allow movement and actions when turn locking is disabled.
+- Made single-target actions replace a previously selected scene target instead of incorrectly reporting that the one-target limit was already full.
+- Fixed token-preview taps/clicks so they actually apply Foundry's horizontal token flip, and made completed dice overlays dismiss early on tap/click while retaining their fade-out.
+- Constrained Midi-QOL target portraits in the player chat feed so they no longer overwhelm the chat card.
+- Added D&D5e close-range ranged-attack disadvantage detection to the player roll preview and simple formula AUTO roll, including vanilla D&D5e games without Midi-QOL or Chris's Premades.
+- Routed Midi-QOL activity reactions for Player Pilot users through a timed Yes/No player prompt, immediately notified the GM that the workflow was waiting, mirrored the synchronized countdown in GM chat, and executed accepted reactions on the GM client.
+- Changed D&D5e roll cards to use the system's activity and damage-type icons.
+- Added a clearly labeled, seat-relative touch-and-drag token rotation control in the Movement header without moving the existing movement pad.
+- Preserved targeting and ping selections per client and scene across refreshes, pruning tokens that are deleted, hidden, or no longer available in that scene.
+- Preserved GM action notices, D&D5e/Midi-QOL system chat cards, formula-roll chat entries, save-DC details, and the newer Player Pilot AUTO audit card for both formula rolls and checks.
+- Rebalanced the dice result presentation so the final total is clearly labeled and substantially larger than the individual die-face numbers.
+- Renamed the Dice tab to Settings, retained Player Dice as its first settings section, removed the unnecessary dice-description copy, and made Classic, Arcane Glow, and Hologram visually distinct.
+- Documented the token-preview tap gesture that horizontally flips a token while choosing its facing.
+- Routed D&D5e checks through the GM canvas so CPR features such as Guidance receive a real token, while forwarding CPR's use confirmation back to the Player Pilot user.
+
 ## v0.3.0
 - Added player chat with public, online-GM, and direct online-user recipients; displayed chat cards are inert so embedded controls cannot interfere with Player Pilot.
 - Added large GM-synchronized, shape-correct faceted dice animations that keep rolling until the GM-side action finishes, then show the total, dice, modifier, and formula.

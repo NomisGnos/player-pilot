@@ -47,6 +47,9 @@ const GAME_ICON_DICE_ROOT = `modules/${MODULE_ID}/assets/game-icons/dice`;
 const MANAGED_NO_CANVAS_KEY = `${MODULE_ID}.managedCoreNoCanvas`;
 const MANAGED_NO_CANVAS_RELOAD_KEY = `${MODULE_ID}.managedCoreNoCanvasReloadAt`;
 const GM_MAP_TOGGLE_POSITION_KEY = `${MODULE_ID}.gmMapTogglePosition`;
+let selectedTargetsSaveQueue = Promise.resolve();
+const pendingAutoRollControls = new Map();
+let lastOutOfTurnWarning = { key: "", at: 0 };
 export const SUPPORT_URL = "https://www.patreon.com/cw/nomisDM";
 const BOOT_MIN_VISIBLE_MS = 1800;
 const BOOT_READY_HOLD_MS = 1200;
@@ -529,6 +532,7 @@ const BLOCKED_WHILE_PAUSED = new Set([
   "apply-targets",
   "ping-targets",
   "move",
+  "rotate-token",
   "ping-token",
   "request-map",
   "map-zoom",
@@ -805,11 +809,27 @@ function combatTokenIdsForScene(sceneId) {
     .filter(Boolean);
 }
 
+function activeCombatTurnForScene(sceneId = "") {
+  const combat = game.combat;
+  const combatSceneId = String(combat?.scene?.id ?? combat?.sceneId ?? "");
+  const requestedSceneId = String(sceneId ?? "");
+  const combatant = combat?.combatant ?? null;
+  const started = !!combatant
+    && (combat?.started === true || Number(combat?.round ?? 0) > 0)
+    && (!combatSceneId || !requestedSceneId || combatSceneId === requestedSceneId);
+  return {
+    started,
+    actorId: started ? String(combatant.actor?.id ?? combatant.actorId ?? "") : "",
+    tokenId: started ? String(combatant.token?.id ?? combatant.tokenId ?? "") : ""
+  };
+}
+
 function buildLocalSceneState(viewerUserId = game.user?.id) {
   const scene = getSceneDoc();
   if (!scene) return null;
   const sceneId = String(scene.id ?? "");
   const combatTokenIds = combatTokenIdsForScene(sceneId);
+  const activeCombatTurn = activeCombatTurnForScene(sceneId);
   const controlledTokenIds = asArray(canvas?.tokens?.controlled)
     .map((token) => String(token.id ?? token.document?.id ?? ""))
     .filter(Boolean);
@@ -824,6 +844,8 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
       y: Number(td.y ?? 0),
       width: Number(td.width ?? 1),
       height: Number(td.height ?? 1),
+      rotation: Number(td.rotation ?? 0),
+      scaleX: Number(td.texture?.scaleX ?? 1),
       disposition: Number(td.disposition ?? 0),
       statuses: tokenConditionKeys(td),
       effects: targetStateBadges(td),
@@ -840,6 +862,9 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
     height: Number(canvas?.dimensions?.height ?? scene.dimensions?.height ?? scene.height ?? 0),
     controlledTokenIds,
     combatTokenIds,
+    combatStarted: activeCombatTurn.started,
+    activeCombatActorId: activeCombatTurn.actorId,
+    activeCombatTokenId: activeCombatTurn.tokenId,
     manualTargetIds: manualTargets.tokenIds,
     manualTargetActorIds: manualTargets.actorIds,
     mapControlsEnabled: setting("mapControlsEnabled", true) === true,
@@ -853,8 +878,43 @@ export function selectedTargetSet(sceneId = state.scene?.id ?? "") {
   return new Set(state.selectedTargets[id]);
 }
 
+function persistSelectedTargets() {
+  if (!game.settings?.set) return;
+  const stored = Object.fromEntries(Object.entries(state.selectedTargets)
+    .map(([sceneId, tokenIds]) => [String(sceneId), Array.from(new Set(asArray(tokenIds).map(String).filter(Boolean)))])
+    .filter(([sceneId, tokenIds]) => sceneId && tokenIds.length));
+  selectedTargetsSaveQueue = selectedTargetsSaveQueue
+    .catch(() => undefined)
+    .then(() => game.settings.set(MODULE_ID, "selectedTargetsByScene", stored))
+    .catch((error) => console.warn("Player Pilot could not save scene targets.", error));
+}
+
+function loadSelectedTargets() {
+  const stored = setting("selectedTargetsByScene", {});
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return;
+  state.selectedTargets = Object.fromEntries(Object.entries(stored)
+    .map(([sceneId, tokenIds]) => [String(sceneId), Array.from(new Set(asArray(tokenIds).map(String).filter(Boolean)))])
+    .filter(([sceneId, tokenIds]) => sceneId && tokenIds.length));
+}
+
 export function setSelectedTargetSet(sceneId, set) {
-  state.selectedTargets[String(sceneId ?? "")] = Array.from(set);
+  const id = String(sceneId ?? "");
+  if (!id) return;
+  const tokenIds = Array.from(new Set(Array.from(set ?? []).map(String).filter(Boolean)));
+  if (tokenIds.length) state.selectedTargets[id] = tokenIds;
+  else delete state.selectedTargets[id];
+  persistSelectedTargets();
+}
+
+function pruneSelectedTargetsForScene(scene = state.scene) {
+  const sceneId = String(scene?.id ?? "");
+  if (!sceneId) return;
+  const previous = asArray(state.selectedTargets[sceneId]).map(String).filter(Boolean);
+  if (!previous.length) return;
+  const available = new Set(displayedTargetTokens(scene).map((token) => String(token.id ?? "")).filter(Boolean));
+  const next = previous.filter((tokenId) => available.has(tokenId));
+  if (next.length === previous.length && next.every((tokenId, index) => tokenId === previous[index])) return;
+  setSelectedTargetSet(sceneId, new Set(next));
 }
 
 export function clearUseTargets() {
@@ -1311,6 +1371,13 @@ function registerSettings() {
     config: false,
     type: String,
     default: ""
+  });
+
+  game.settings.register(MODULE_ID, "selectedTargetsByScene", {
+    scope: "client",
+    config: false,
+    type: Object,
+    default: {}
   });
 
   game.settings.register(MODULE_ID, "lastChangelogVersion", {
@@ -2418,7 +2485,12 @@ function renderMapView() {
     <section class="pp-view active">
       <div class="pp-dpad-wrap">
         <div class="pp-section pp-movement-section">
-          ${renderSectionHeader("Movement", "fa-person-running")}
+          <div class="pp-section-header pp-big-header pp-movement-header">
+            <h2>${renderInterfaceIcon("fa-person-running")}<span>Movement</span></h2>
+            <button class="pp-button pp-rotate-mode-toggle" type="button" data-action="rotate-token" title="Rotate token" aria-label="Rotate token">
+              <i class="fas fa-rotate"></i><span>Rotate</span>
+            </button>
+          </div>
           <div class="pp-dpad">
             <button class="up-left" type="button" data-action="move" data-dir="up-left" aria-label="Move up left"><i class="fas fa-arrow-up"></i></button>
             <button class="up" type="button" data-action="move" data-dir="up"><i class="fas fa-arrow-up"></i></button>
@@ -2805,6 +2877,10 @@ async function handleDocumentClick(event) {
     await moveActiveToken(actionEl.dataset.dir ?? "");
     return;
   }
+  if (action === "rotate-token") {
+    openTokenRotationDialog();
+    return;
+  }
   if (action === "ping-token") {
     await pingActiveToken();
     return;
@@ -2940,6 +3016,7 @@ function openUseDialog(itemId, flowOptions = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
+  warnOutOfTurn(actor, "use");
   const model = game.playerPilot.model;
   const canUseItem = model.canUseItem(item);
   if (!canUseItem) {
@@ -2978,6 +3055,7 @@ function openUseDialog(itemId, flowOptions = {}) {
       itemRequiresMapPlacement,
       openManualRollDialog,
       openPingOnMap,
+      outOfTurnWarning,
       pilotPaused,
       renderCastPreview,
       renderModalTargetPicker,
@@ -3059,7 +3137,6 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
   const spellStep = item.type === "spell" && (!model.usesSpellRanks || slots.length > 0);
-  clearUseTargets();
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
     if (!sneakAttack) return null;
     const control = modal.querySelector("[data-sneak-attack-control]");
@@ -3131,6 +3208,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   };
   openModal(`
     <h2>Use ${escapeHtml(itemDisplayName(item))}</h2>
+    ${outOfTurnWarning(actor) ? `<div class="pp-out-of-turn-warning" role="status"><i class="fas fa-clock"></i><div><strong>Out-of-turn action</strong><span>${escapeHtml(outOfTurnWarning(actor))}</span></div></div>` : ""}
     <div class="pp-use-step ${activityStep ? "" : "hidden"}" data-use-step="activity">
       <div class="pp-activity-choice-hero">
         <i class="fas fa-list-check"></i>
@@ -3228,18 +3306,22 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       else {
         const limit = Number(targetInfo.count ?? 0);
         if (Number.isFinite(limit) && limit > 0 && selected.size >= limit) {
-          ui.notifications?.warn?.(`Select up to ${limit} target${limit === 1 ? "" : "s"}.`);
-          return;
+          if (limit === 1) selected.clear();
+          else {
+            ui.notifications?.warn?.(`Select up to ${limit} targets.`);
+            return;
+          }
         }
         selected.add(tokenId);
       }
       setSelectedTargetSet(sceneId, selected);
       applyTargetsForCurrentUser(Array.from(selected), sceneId);
-      const row = button.closest(".pp-token-row");
-      const isSelected = selected.has(tokenId);
-      row?.classList?.toggle?.("selected", isSelected);
-      button.classList.toggle("primary", isSelected);
-      button.textContent = isSelected ? "Targeted" : "Target";
+      for (const targetButton of _modal.querySelectorAll("[data-modal-action='modalToggleTarget'][data-token-id]")) {
+        const isSelected = selected.has(String(targetButton.dataset.tokenId ?? ""));
+        targetButton.closest(".pp-token-row")?.classList?.toggle?.("selected", isSelected);
+        targetButton.classList.toggle("primary", isSelected);
+        targetButton.textContent = isSelected ? "Targeted" : "Target";
+      }
       updateModalTargetCount(selected.size, targetInfo);
       refreshSneakAttackChoice(_modal, _modal.querySelector("[name='activityId']")?.value ?? defaultActivityId);
       sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: Array.from(selected) });
@@ -3285,7 +3367,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       openManualRollDialog(button.dataset);
     },
     autoInstruction: async (_modal, button) => {
-      await autoRollInstruction(item, button.dataset);
+      await autoRollInstruction(item, button.dataset, { button });
     },
     nativeInstruction: async (_modal, button) => {
       await runNativeItemRoll(item, button.dataset.nativeAction ?? "", button.dataset.castRank, button.dataset.attackNumber);
@@ -3609,6 +3691,31 @@ function tokenDistanceFeet(a, b) {
   return (Math.hypot(ax - bx, ay - by) / gridSize) * gridDistance;
 }
 
+function tokenEdgeDistanceFeet(a, b) {
+  const scene = state.scene ?? buildLocalSceneState();
+  const gridSize = Number(scene?.gridSize ?? 100) || 100;
+  const gridDistance = Number(scene?.gridDistance ?? 5) || 5;
+  const aRight = Number(a.x ?? 0) + (Number(a.width ?? 1) * gridSize);
+  const aBottom = Number(a.y ?? 0) + (Number(a.height ?? 1) * gridSize);
+  const bRight = Number(b.x ?? 0) + (Number(b.width ?? 1) * gridSize);
+  const bBottom = Number(b.y ?? 0) + (Number(b.height ?? 1) * gridSize);
+  const gapX = Math.max(0, Number(b.x ?? 0) - aRight, Number(a.x ?? 0) - bRight);
+  const gapY = Math.max(0, Number(b.y ?? 0) - aBottom, Number(a.y ?? 0) - bBottom);
+  return ((Math.hypot(gapX, gapY) / gridSize) * gridDistance) + gridDistance;
+}
+
+function tokenIsIncapacitated(token = {}) {
+  const statuses = new Set((token.statuses ?? []).map((value) => String(value).toLowerCase()));
+  return ["dead", "defeated", "incapacitated", "paralyzed", "stunned", "unconscious"]
+    .some((condition) => Array.from(statuses).some((status) => status.includes(condition)));
+}
+
+function dispositionsAreHostile(left, right) {
+  const first = Math.sign(Number(left ?? 0));
+  const second = Math.sign(Number(right ?? 0));
+  return first !== 0 && second !== 0 && first !== second;
+}
+
 export function attackRollMode(actor, activity) {
   const data = game.playerPilot.model.activitySystem(activity);
   const mode = Number(data?.attack?.roll?.mode ?? data?.roll?.mode ?? 0);
@@ -3638,15 +3745,27 @@ export function attackRollMode(actor, activity) {
   if (hasCondition(targetConditions, "invisible")) disadvantageReasons.push("Target Invisible");
   if (hasCondition(targetConditions, "dodging") || hasCondition(targetConditions, "dodge")) disadvantageReasons.push("Target Dodging");
 
+  const attackType = fieldText(
+    data?.attack?.type?.value,
+    data?.attack?.type,
+    data?.actionType,
+    activity?.item?.system?.actionType
+  ).toLowerCase();
+  const ranged = attackType.includes("ranged") || ["rwak", "rsak"].includes(attackType);
+  if (ranged) {
+    const source = activeTokenForActor(actor?.id);
+    const nearbyHostile = source && (state.scene?.tokens ?? []).find((candidate) => (
+      candidate.id !== source.id
+      && dispositionsAreHostile(source.disposition, candidate.disposition)
+      && !tokenIsIncapacitated(candidate)
+      && tokenEdgeDistanceFeet(source, candidate) <= (Number(state.scene?.gridDistance ?? 5) || 5) + 0.01
+    ));
+    if (nearbyHostile) disadvantageReasons.push(`Nearby Hostile Creature (${nearbyHostile.name})`);
+  }
+
   if (hasCondition(targetConditions, "prone")) {
     const source = activeTokenForActor(actor?.id);
     const distance = source && target ? tokenDistanceFeet(source, target) : NaN;
-    const attackType = fieldText(
-      data?.attack?.type?.value,
-      data?.attack?.type,
-      data?.actionType,
-      activity?.item?.system?.actionType
-    ).toLowerCase();
     const melee = attackType.includes("melee") || ["mwak", "msak"].includes(attackType);
     if (melee && Number.isFinite(distance) && distance <= (Number(state.scene?.gridDistance ?? 5) || 5) + 0.01) {
       advantageReasons.push("Nearby Prone Target");
@@ -3717,8 +3836,9 @@ export function renderRollInstructions(instructions = [], allowManual = true, ac
         : `<button class="pp-button primary" type="button" ${actionAttribute}="${escapeHtml(entry.modalAction ?? "nativeInstruction")}" data-native-action="${escapeHtml(entry.nativeAction)}" data-operation="${escapeHtml(entry.operation ?? "")}" data-cast-rank="${escapeHtml(entry.castRank ?? "")}" data-attack-number="${escapeHtml(entry.attackNumber ?? "")}" data-variant-index="${escapeHtml(entry.variantIndex ?? "")}">${escapeHtml(entry.buttonLabel ?? `Roll ${entry.kind === "damage" ? "Damage" : entry.kind === "healing" ? "Healing" : ""}`)}</button>`}
             </div>
           ` : (allowManual && entry.formula ? `
-            <div class="pp-roll-instruction-actions">
-              <button class="pp-button primary" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}">Auto</button>
+            <div class="pp-roll-instruction-actions pp-auto-roll-actions">
+              <button class="pp-button primary" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}">AUTO</button>
+              <output class="pp-auto-roll-result" data-auto-roll-result aria-live="polite"></output>
             </div>
           ` : "")}
         </article>
@@ -3756,6 +3876,20 @@ function formulaFlatModifier(formula = "") {
 function rollInstructionIcon(entry = {}) {
   const kind = String(entry.kind ?? "").toLowerCase();
   const label = String(entry.label ?? "").toLowerCase();
+  if (game.system.id === "dnd5e") {
+    const activityIcons = {
+      attack: "systems/dnd5e/icons/svg/activity/attack.svg",
+      save: "systems/dnd5e/icons/svg/activity/save.svg",
+      healing: "systems/dnd5e/icons/svg/activity/heal.svg"
+    };
+    if (activityIcons[kind]) return activityIcons[kind];
+    if (kind === "damage") {
+      const damageType = Object.keys(CONFIG?.DND5E?.damageTypes ?? {}).find((candidate) => label.includes(candidate));
+      return CONFIG?.DND5E?.damageTypes?.[damageType]?.icon
+        ?? (damageType ? `systems/dnd5e/icons/svg/damage/${damageType}.svg` : "systems/dnd5e/icons/svg/activity/damage.svg");
+    }
+    return "systems/dnd5e/icons/svg/activity/check.svg";
+  }
   if (kind === "attack") return `${CORE_ICON_ROOT}/sword.svg`;
   if (kind === "save") return `${CORE_ICON_ROOT}/shield.svg`;
   if (kind === "healing") return `${CORE_ICON_ROOT}/heal.svg`;
@@ -3781,7 +3915,44 @@ function rollInstructionIcon(entry = {}) {
   return `${CORE_ICON_ROOT}/dice-target.svg`;
 }
 
-async function autoRollInstruction(item, data = {}) {
+function beginAutoRollControl(button, requestId) {
+  if (!(button instanceof HTMLElement) || !requestId) return;
+  const priorRequestId = String(button.dataset.autoRequestId ?? "");
+  if (priorRequestId) pendingAutoRollControls.delete(priorRequestId);
+  button.dataset.autoRequestId = String(requestId);
+  button.disabled = true;
+  button.textContent = "ROLLING...";
+  button.closest(".pp-auto-roll-actions")?.classList.add("rolling");
+  pendingAutoRollControls.set(String(requestId), button);
+}
+
+function finishAutoRollControl(data = {}) {
+  const requestId = String(data.requestId ?? "");
+  const button = pendingAutoRollControls.get(requestId);
+  if (!(button instanceof HTMLElement)) return;
+  pendingAutoRollControls.delete(requestId);
+  if (String(button.dataset.autoRequestId ?? "") !== requestId) return;
+  button.disabled = false;
+  button.closest(".pp-auto-roll-actions")?.classList.remove("rolling");
+  const totals = asArray(data.rolls).map((roll) => Number(roll?.total)).filter(Number.isFinite);
+  const result = button.closest(".pp-auto-roll-actions")?.querySelector("[data-auto-roll-result]");
+  if (totals.length) {
+    button.textContent = "RE-ROLL";
+    if (result instanceof HTMLElement) {
+      result.replaceChildren();
+      const label = document.createElement("span");
+      label.textContent = totals.length > 1 ? "RESULTS" : "RESULT";
+      const value = document.createElement("strong");
+      value.textContent = totals.join(" / ");
+      result.append(label, value);
+    }
+    return;
+  }
+  button.textContent = data.failed === true ? "AUTO" : "RE-ROLL";
+  if (result instanceof HTMLElement) result.textContent = data.failed === true ? "Roll failed" : "Completed";
+}
+
+async function autoRollInstruction(item, data = {}, control = {}) {
   if (pilotPaused()) {
     warnPaused();
     return;
@@ -3789,17 +3960,33 @@ async function autoRollInstruction(item, data = {}) {
   const actor = currentActor();
   const formula = String(data.formula ?? "").trim();
   if (!actor || !formula) return;
+  warnOutOfTurn(actor, "roll");
+  const kind = String(data.rollKind ?? "").toLowerCase();
+  const requestId = foundry.utils.randomID();
   const payload = {
+    requestId,
     actorId: actor.id,
     itemId: item?.id ?? "",
     formula,
-    label: String(data.name ?? "Roll")
+    label: String(data.name ?? "Roll"),
+    rollLabel: String(data.name ?? "Roll"),
+    rollKind: kind,
+    sceneId: state.scene?.id ?? "",
+    targetIds: Array.from(selectedTargetSet(state.scene?.id ?? ""))
   };
+  beginAutoRollControl(control.button, requestId);
   if (activeGmIds().length && sendSocket("formulaRoll", payload)) {
     showResultToast(`${payload.label} sent`, formula);
-    return;
+    return requestId;
   }
-  await rollFormulaForActor(actor, payload);
+  try {
+    const roll = await rollFormulaForActor(actor, payload);
+    finishAutoRollControl({ requestId, rolls: rollSummariesFrom(roll) });
+  } catch (error) {
+    finishAutoRollControl({ requestId, failed: true });
+    throw error;
+  }
+  return requestId;
 }
 
 async function rollFormulaForActor(actor, data = {}) {
@@ -3829,7 +4016,7 @@ function openRollReminderDialog(item, actor, options = {}) {
       openManualRollDialog(button.dataset);
     },
     autoInstruction: async (_modal, button) => {
-      await autoRollInstruction(item, button.dataset);
+      await autoRollInstruction(item, button.dataset, { button });
     },
     nativeInstruction: async (_modal, button) => {
       await runNativeItemRoll(item, button.dataset.nativeAction ?? "", button.dataset.castRank, button.dataset.attackNumber);
@@ -3842,12 +4029,15 @@ export async function executePlayerFirst(actionLabel, localFn, socketType, paylo
     warnPaused();
     return false;
   }
-  if (setting("combatTurnLock", false) === true && ["useItem", "rollCheck", "rest", "moveToken", "prepareSpell", "pf2eStrike", "pf2eItemRoll"].includes(socketType)) {
+  if (["useItem", "rollCheck", "rest", "moveToken", "prepareSpell", "pf2eStrike", "pf2eItemRoll"].includes(socketType)) {
     const actor = currentActor();
     if (actor && !actorHasActiveTurn(actor)) {
-      ui.notifications?.warn?.("It is not this actor's turn.");
-      addLog("Turn locked");
-      return false;
+      if (setting("combatTurnLock", false) === true) {
+        ui.notifications?.warn?.("It is not this actor's turn.");
+        addLog("Turn locked");
+        return false;
+      }
+      warnOutOfTurn(actor, socketType);
     }
   }
   const authority = String(setting("movementAuthority", "playerFirst"));
@@ -3870,13 +4060,34 @@ export async function executePlayerFirst(actionLabel, localFn, socketType, paylo
 }
 
 export function actorHasActiveTurn(actor) {
-  const combatant = game.combat?.combatant;
-  if (!combatant) return true;
-  const combatActorId = String(combatant.actor?.id ?? combatant.actorId ?? "");
+  if (!actor) return true;
+  const liveTurn = activeCombatTurnForScene(state.scene?.id ?? "");
+  const combatStarted = liveTurn.started || state.scene?.combatStarted === true;
+  if (!combatStarted) return true;
+  const combatActorId = liveTurn.actorId || String(state.scene?.activeCombatActorId ?? "");
   if (combatActorId && combatActorId === String(actor.id)) return true;
-  const activeTokenId = String(combatant.token?.id ?? combatant.tokenId ?? "");
+  const activeTokenId = liveTurn.tokenId || String(state.scene?.activeCombatTokenId ?? "");
   if (!activeTokenId) return false;
   return getActorTokenCandidates(actor.id).some((token) => token.id === activeTokenId);
+}
+
+function outOfTurnWarning(actor = currentActor()) {
+  return actor && !actorHasActiveTurn(actor)
+    ? "You may proceed, but it is not your turn in the active combat."
+    : "";
+}
+
+function warnOutOfTurn(actor = currentActor(), action = "action") {
+  const message = outOfTurnWarning(actor);
+  if (!message) return false;
+  const now = Date.now();
+  const key = `${String(actor?.id ?? "")}:${String(action ?? "action")}`;
+  if (lastOutOfTurnWarning.key !== key || now - lastOutOfTurnWarning.at > 3500) {
+    ui.notifications?.warn?.(message);
+    addLog("Out-of-turn action");
+    lastOutOfTurnWarning = { key, at: now };
+  }
+  return true;
 }
 
 async function runNativeItemRoll(item, action, castRank = "", attackNumber = "") {
@@ -3886,6 +4097,7 @@ async function runNativeItemRoll(item, action, castRank = "", attackNumber = "")
   }
   const actor = currentActor();
   if (!actor || !item || !isPaizo2e()) return;
+  warnOutOfTurn(actor, "roll");
   const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
   const requestedRank = Number(castRank);
   const requestedAttack = Number(attackNumber);
@@ -3919,6 +4131,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   const actor = currentActor();
   const item = findItem(itemId);
   if (!actor || !item) return;
+  warnOutOfTurn(actor, "use");
   const canUseItem = game.playerPilot.model.canUseItem(item);
   if (!canUseItem) {
     const message = game.playerPilot.model.usesSpellRanks && item.type === "spell"
@@ -3963,6 +4176,34 @@ export async function rollCheck(kind, key) {
   }
   const actor = currentActor();
   if (!actor) return;
+  warnOutOfTurn(actor, "roll");
+  const check = cachedModel(actor)?.groups?.checks?.find((entry) => entry.kind === kind && entry.key === key);
+  const baseLabel = String(check?.label ?? check?.name ?? capitalizeWords(key || kind || "Roll"));
+  const rollLabel = kind === "abilitySave"
+    ? `${baseLabel} Saving Throw`
+    : kind === "abilityCheck"
+      ? String(check?.name ?? `${baseLabel} Ability Check`)
+      : kind === "skill"
+        ? `${String(check?.name ?? baseLabel)} Check`
+        : kind === "deathSave"
+          ? "Death Saving Throw"
+          : kind === "initiative" ? "Initiative" : baseLabel;
+  const activeToken = activeTokenForActor(actor.id);
+  const payload = {
+    actorId: actor.id,
+    kind,
+    key,
+    rollLabel,
+    sceneId: state.scene?.id ?? "",
+    tokenId: activeToken?.id ?? "",
+    targetIds: Array.from(selectedTargetSet(state.scene?.id ?? ""))
+  };
+  if (game.playerPilot.model.id === "dnd5e" && activeGmIds().length) {
+    if (sendSocket("rollCheck", payload)) {
+      addLog(`${rollLabel} sent`);
+      return;
+    }
+  }
   let rollResult = null;
   const executed = await executePlayerFirst(
     `Roll ${kind}`,
@@ -3971,7 +4212,7 @@ export async function rollCheck(kind, key) {
       return rollResult;
     },
     "rollCheck",
-    { actorId: actor.id, kind, key }
+    payload
   );
   if (executed && rollResult) showNativeRollResult(rollResult, kind, key);
 }
@@ -4216,12 +4457,15 @@ function requestSceneState(force = false) {
 function sceneStateFingerprint(scene) {
   if (!scene) return "";
   const tokens = (scene.tokens ?? [])
-    .map((token) => `${token.id}:${token.actorId}:${Math.round(Number(token.x ?? 0))},${Math.round(Number(token.y ?? 0))}:${token.disposition}:${token.owned ? 1 : 0}:${token.playerOwned ? 1 : 0}:${(token.statuses ?? []).join(",")}:${(token.effects ?? []).map((effect) => `${effect.id ?? ""}:${effect.img ?? ""}`).join(",")}`)
+    .map((token) => `${token.id}:${token.actorId}:${Math.round(Number(token.x ?? 0))},${Math.round(Number(token.y ?? 0))}:${Math.round(Number(token.rotation ?? 0))}:${Number(token.scaleX ?? 1) < 0 ? -1 : 1}:${token.disposition}:${token.owned ? 1 : 0}:${token.playerOwned ? 1 : 0}:${(token.statuses ?? []).join(",")}:${(token.effects ?? []).map((effect) => `${effect.id ?? ""}:${effect.img ?? ""}`).join(",")}`)
     .join("|");
   return [
     scene.id ?? "",
     scene.mapControlsEnabled ? 1 : 0,
     (scene.combatTokenIds ?? []).join(","),
+    scene.combatStarted ? 1 : 0,
+    scene.activeCombatActorId ?? "",
+    scene.activeCombatTokenId ?? "",
     (scene.manualTargetIds ?? []).join(","),
     tokens
   ].join(";");
@@ -4253,6 +4497,7 @@ async function moveActiveToken(dir) {
     ui.notifications?.warn?.("No owned actor found for this user.");
     return;
   }
+  warnOutOfTurn(actor, "move");
   if (!token && canvas?.ready) {
     ui.notifications?.warn?.("No owned token found in the current scene.");
     return;
@@ -4808,11 +5053,16 @@ async function handleSocket(data) {
 }
 
 async function handlePlayerSocket(data) {
+  if (data.type === "reactionPrompt") {
+    openPilotReactionPrompt(data);
+    return;
+  }
   if (data.type === "sceneState") {
     const nextScene = data.scene ?? null;
     const fingerprint = sceneStateFingerprint(nextScene);
     const changed = fingerprint !== state.sceneFingerprint;
     state.scene = nextScene;
+    pruneSelectedTargetsForScene(nextScene);
     state.sceneFingerprint = fingerprint;
     state.lastSceneReceivedAt = Date.now();
     if (!state.selectedTokenId) activeTokenForActor();
@@ -4823,7 +5073,12 @@ async function handlePlayerSocket(data) {
   }
   if (data.type === "commandResult") {
     resolveDiceRequest(data);
-    if (data.movement && typeof data.movement === "object") {
+    finishAutoRollControl(data);
+    if (data.rotation && typeof data.rotation === "object") {
+      applyTokenRotationToSceneState(data.rotation);
+      showResultToast("Token facing updated", `${Math.round(Number(data.rotation.rotation ?? 0))}°`);
+      queueRender();
+    } else if (data.movement && typeof data.movement === "object") {
       applyMovementToSceneState(data.movement);
       updatePlayerMovementStatus(data.movement, String(data.dir ?? ""));
       queueRender();
@@ -4862,6 +5117,8 @@ async function handlePlayerSocket(data) {
 
 const gmProxyTargets = new Map();
 const gmRollContexts = [];
+const cprPromptUsersByActor = new Map();
+const pendingGmReactions = new Map();
 const gmMapSnapshots = new Map();
 const gmSceneStateSentAt = new Map();
 const gmSceneStateFingerprints = new Map();
@@ -4871,11 +5128,17 @@ const MOVEMENT_BURST_MS = 2500;
 const MOVEMENT_DISPLAY_MS = 4500;
 
 async function handleGmSocket(data) {
+  if (data.type === "reactionResponse") {
+    const pending = pendingGmReactions.get(String(data.requestId ?? ""));
+    if (!pending || pending.userId !== String(data.userId ?? "")) return;
+    pending.resolve(String(data.choiceId ?? ""));
+    return;
+  }
   if (data.type === "requestSceneState") {
     sendSceneState(data.userId, true);
     return;
   }
-  if (game.paused === true && ["targetUpdate", "moveToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
+  if (game.paused === true && ["targetUpdate", "moveToken", "rotateToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
     sendSocket("commandResult", { targetUserIds: [data.userId], requestId: data.requestId, message: "Game paused", failed: true });
     return;
   }
@@ -4937,6 +5200,21 @@ async function handleGmSocket(data) {
   }
   if (data.type === "rollCheck") {
     await gmRun("Rolled", data.userId, () => gmRollCheck(data), data);
+    return;
+  }
+  if (data.type === "rotateToken") {
+    try {
+      const rotation = await rotateTokenDocument(data);
+      sendSocket("commandResult", {
+        targetUserIds: [data.userId],
+        message: "Token facing updated",
+        rotation
+      });
+      sendSceneStateDebounced();
+    } catch (error) {
+      console.error("Player Pilot GM command failed: Rotate token", error);
+      sendSocket("commandResult", { targetUserIds: [data.userId], message: "Token rotation failed", failed: true });
+    }
     return;
   }
   if (data.type === "pf2eStrike") {
@@ -5003,6 +5281,9 @@ async function gmRun(label, userId, fn, request = {}) {
       seenRolls.add(key);
       return true;
     });
+    if (["formulaRoll", "rollCheck"].includes(request.type) && rolls.length) {
+      await createGmRollAuditMessage(label, userId, request, rolls);
+    }
     sendSocket("commandResult", {
       targetUserIds: [userId],
       requestId: context?.requestId,
@@ -5112,10 +5393,15 @@ function renderGmActionNotice({ requester, actor, item, data }) {
   const targetText = compactTargetText(targets, 4);
   const playerChoice = String(data.options?.playerChoice ?? "").trim();
   const playerChoiceLabel = String(data.options?.playerChoiceLabel ?? "Choice").trim();
+  const saves = asArray(game.playerPilot.model.collectRollInstructions?.(item, data.options ?? {}))
+    .filter((entry) => entry.kind === "save")
+    .map((entry) => [cleanRulesText(entry.label), cleanRulesText(entry.detail)].filter(Boolean).join(" — "))
+    .filter(Boolean);
   const actionDetail = [activityName, activation].filter(Boolean).join(" / ");
   const detailPills = [
     levelText ? `<span class="pp-gm-action-pill pp-gm-action-level"><b>${escapeHtml(levelLabel)}</b><strong>${escapeHtml(levelText)}</strong></span>` : "",
     `<span class="pp-gm-action-pill pp-gm-action-target"><b>Target</b><strong>${escapeHtml(targetText)}</strong></span>`,
+    ...saves.map((save) => `<span class="pp-gm-action-pill pp-gm-action-save"><b>Save</b><strong>${escapeHtml(save)}</strong></span>`),
     playerChoice ? `<span class="pp-gm-action-pill"><b>${escapeHtml(playerChoiceLabel)}</b><strong>${escapeHtml(playerChoice)}</strong></span>` : ""
   ].filter(Boolean).join("");
   return {
@@ -5151,7 +5437,15 @@ async function gmUseItem(data) {
     });
   }
   const requester = game.users?.get?.(String(data.userId ?? ""))?.name ?? "Player";
-  const notice = renderGmActionNotice({ requester, actor, item, data });
+  const model = game.playerPilot.model;
+  const previousActor = model.actor ?? null;
+  model.setActor(actor);
+  let notice;
+  try {
+    notice = renderGmActionNotice({ requester, actor, item, data });
+  } finally {
+    model.setActor(previousActor);
+  }
   const toastParts = [
     `${requester}: ACTION ${item.name}`,
     notice.levelText ? `${game.playerPilot.model.usesSpellRanks ? "RANK" : "LEVEL"} ${notice.levelText}` : "",
@@ -5173,10 +5467,168 @@ async function gmUseItem(data) {
   return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
 }
 
+function openPilotReactionPrompt(data = {}) {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const timeout = clamp(Number(data.timeout ?? 30), 5, 90);
+  const expiresAt = Number(data.expiresAt) > Date.now()
+    ? Number(data.expiresAt)
+    : Date.now() + (timeout * 1000);
+  const initialRemaining = reactionSecondsRemaining(expiresAt);
+  const respond = (choiceId = "") => {
+    sendSocket("reactionResponse", {
+      targetUserIds: [String(data.gmUserId ?? "")].filter(Boolean),
+      requestId: String(data.requestId ?? ""),
+      choiceId: String(choiceId ?? "")
+    });
+    closeModal();
+  };
+  openModal(`
+    <div class="pp-reaction-heading">
+      <i class="fas fa-bolt"></i>
+      <div>
+        <h2>${escapeHtml(data.actorName ?? "Reaction")}</h2>
+        <p>${escapeHtml(data.prompt ?? "Choose whether to use a reaction.")}</p>
+      </div>
+      <strong data-reaction-countdown>${initialRemaining}s</strong>
+    </div>
+    <div class="pp-reaction-choices">
+      ${choices.map((choice) => `
+        <button class="pp-reaction-choice" type="button" data-modal-action="chooseReaction" data-choice-id="${escapeHtml(choice.id)}">
+          <img src="${escapeHtml(choice.img)}" alt="">
+          <span><strong>${escapeHtml(choice.label)}</strong><small>Yes, use this reaction</small></span>
+          <i class="fas fa-check"></i>
+        </button>
+      `).join("")}
+    </div>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="declineReaction"><i class="fas fa-xmark"></i> No reaction</button>
+      ${choices.length === 1 ? `<button class="pp-button primary" type="button" data-modal-action="chooseReaction" data-choice-id="${escapeHtml(choices[0].id)}"><i class="fas fa-check"></i> Yes, use it</button>` : ""}
+    </div>
+  `, {
+    chooseReaction: async (_modal, button) => respond(button.dataset.choiceId ?? ""),
+    declineReaction: async () => respond("")
+  });
+  const openedModal = state.modal;
+  const timer = window.setInterval(() => {
+    if (state.modal !== openedModal) {
+      window.clearInterval(timer);
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    const counter = openedModal?.querySelector?.("[data-reaction-countdown]");
+    if (counter) counter.textContent = `${remaining}s`;
+    if (remaining <= 0) {
+      window.clearInterval(timer);
+      respond("");
+    }
+  }, 250);
+}
+
+function installCprPilotPromptBridge() {
+  const dialogUtils = globalThis.chrisPremades?.utils?.dialogUtils;
+  if (!game.modules.get("chris-premades")?.active || typeof dialogUtils?.confirmUseItem !== "function") return false;
+  if (dialogUtils.confirmUseItem.playerPilotBridge === true) return true;
+  const original = dialogUtils.confirmUseItem;
+  const bridge = function (item, options = {}) {
+    const actorId = String(item?.actor?.id ?? item?.parent?.id ?? "");
+    const contexts = cprPromptUsersByActor.get(actorId) ?? [];
+    const userId = contexts.at(-1)?.userId;
+    return original.call(this, item, userId ? { ...options, userId } : options);
+  };
+  bridge.playerPilotBridge = true;
+  dialogUtils.confirmUseItem = bridge;
+  return true;
+}
+
+async function withCprPilotPromptUser(actor, userId, fn) {
+  const activeUserId = String(userId ?? "");
+  if (!activeUserId || !installCprPilotPromptBridge()) return fn();
+  const actorId = String(actor?.id ?? "");
+  const marker = foundry.utils.randomID();
+  const contexts = cprPromptUsersByActor.get(actorId) ?? [];
+  contexts.push({ marker, userId: activeUserId });
+  cprPromptUsersByActor.set(actorId, contexts);
+  try {
+    return await fn();
+  } finally {
+    const current = cprPromptUsersByActor.get(actorId) ?? [];
+    const index = current.findIndex((entry) => entry.marker === marker);
+    if (index >= 0) current.splice(index, 1);
+    if (current.length) cprPromptUsersByActor.set(actorId, current);
+    else cprPromptUsersByActor.delete(actorId);
+  }
+}
+
 async function gmRollCheck(data) {
   const actor = gmActor(data.actorId);
   if (!actor) throw new Error("Actor not found.");
-  return game.playerPilot.model.rollCheck(actor, data.kind, data.key);
+  if (Array.isArray(data.targetIds)) {
+    gmProxyTargets.set(String(data.userId), {
+      actorId: data.actorId,
+      sceneId: data.sceneId,
+      targetIds: data.targetIds,
+      at: Date.now()
+    });
+  }
+  const model = game.playerPilot.model;
+  const previousActor = model.actor ?? null;
+  model.setActor(actor);
+  try {
+    return await withCprPilotPromptUser(actor, data.userId, () => (
+      withProxyTargetsForUser(data.userId, () => model.rollCheck(data.kind, data.key))
+    ));
+  } finally {
+    model.setActor(previousActor);
+  }
+}
+
+function gmRollAuditTitle(label, request = {}) {
+  if (request.type === "rollCheck") {
+    if (request.kind === "abilitySave") return `${capitalizeWords(request.key || "Ability")} Saving Throw`;
+    return String(request.rollLabel ?? label ?? "Check Roll");
+  }
+  return String(request.rollLabel ?? label ?? "Roll");
+}
+
+function renderGmRollAuditDice(summary = {}) {
+  const dice = asArray(summary.dice).flatMap((die) => {
+    const results = asArray(die.results).map(Number).filter(Number.isFinite);
+    if (results.length) return results.map((result) => `<span><b>d${Number(die.faces)}</b>${result}</span>`);
+    return [`<span><b>${Number(die.count ?? 1)}d${Number(die.faces)}</b>—</span>`];
+  }).join("");
+  return `
+    <div class="pp-gm-roll-audit-result">
+      <div>${dice || `<span><b>Roll</b>${escapeHtml(summary.formula ?? "")}</span>`}</div>
+      <small>${escapeHtml(summary.formula ?? "Roll")}</small>
+      <strong>${Number(summary.total)}</strong>
+    </div>
+  `;
+}
+
+async function createGmRollAuditMessage(label, userId, request = {}, rolls = []) {
+  try {
+    const actor = gmActor(request.actorId);
+    const requester = game.users?.get?.(String(userId ?? ""))?.name ?? "Player";
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      whisper: asArray(game.users).filter((user) => user.isGM).map((user) => user.id),
+      content: `
+        <section class="pp-gm-roll-audit">
+          <header><i class="fas fa-dice-d20"></i><div><strong>Player Pilot AUTO</strong><span>${escapeHtml(requester)} / ${escapeHtml(actor?.name ?? "Actor")}</span></div></header>
+          <h3>${escapeHtml(gmRollAuditTitle(label, request))}</h3>
+          ${rolls.map(renderGmRollAuditDice).join("")}
+        </section>
+      `,
+      flags: {
+        [MODULE_ID]: {
+          autoRollLog: true,
+          requestId: String(request.requestId ?? "")
+        }
+      }
+    });
+  } catch (error) {
+    console.warn("Player Pilot could not create the GM AUTO roll log.", error);
+  }
 }
 
 async function gmPf2eStrike(data) {
@@ -5191,6 +5643,236 @@ async function gmPf2eStrike(data) {
     });
   }
   return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.executeStrike(actor, data));
+}
+
+function pilotUserForActor(actor) {
+  if (!actor) return null;
+  const pilotIds = new Set(userIdsForPilots());
+  const candidates = asArray(game.users).filter((user) => user.active && pilotIds.has(user.id));
+  return candidates.find((user) => String(user.character?.id ?? "") === String(actor.id ?? ""))
+    ?? candidates.find((user) => Number(actor.ownership?.[user.id] ?? 0) >= OWNER)
+    ?? null;
+}
+
+function reactionChoiceLabel(activity) {
+  const itemName = cleanRulesText(activity?.item?.name ?? "Reaction");
+  const activityName = cleanRulesText(activity?.name ?? activity?.actionName ?? "");
+  if (!activityName || /^midi use$/i.test(activityName) || activityName.toLowerCase() === itemName.toLowerCase()) return itemName;
+  return `${itemName}: ${activityName}`;
+}
+
+function reactionSecondsRemaining(expiresAt) {
+  return Math.max(0, Math.ceil((Number(expiresAt ?? 0) - Date.now()) / 1000));
+}
+
+function renderGmReactionChatCard(details = {}) {
+  const status = ["accepted", "declined", "timeout", "unavailable"].includes(details.status)
+    ? details.status
+    : "pending";
+  const statusText = {
+    pending: `Waiting for ${details.userName ?? "player"}`,
+    accepted: `${details.userName ?? "Player"} accepted${details.resultLabel ? ` ${details.resultLabel}` : ""}`,
+    declined: `${details.userName ?? "Player"} declined the reaction`,
+    timeout: `${details.userName ?? "Player"} did not answer in time`,
+    unavailable: `The prompt could not be delivered to ${details.userName ?? "the player"}`
+  }[status];
+  const statusIcon = {
+    pending: "fa-hourglass-half",
+    accepted: "fa-check",
+    declined: "fa-xmark",
+    timeout: "fa-clock",
+    unavailable: "fa-triangle-exclamation"
+  }[status];
+  const remaining = reactionSecondsRemaining(details.expiresAt);
+  const choices = Array.isArray(details.choices) ? details.choices : [];
+  return `
+    <section class="pp-reaction-chat-card ${escapeHtml(status)}" data-pp-reaction-request="${escapeHtml(details.requestId ?? "")}">
+      <header>
+        <i class="fas fa-bolt"></i>
+        <div>
+          <strong>MIDI-QOL Reaction</strong>
+          <span>${escapeHtml(details.actorName ?? "Reaction")}</span>
+        </div>
+        ${status === "pending" ? `<b data-pp-reaction-countdown>${remaining}s</b>` : `<b><i class="fas ${statusIcon}"></i></b>`}
+      </header>
+      <p>${escapeHtml(details.prompt ?? "Choose whether to use a reaction.")}</p>
+      <div class="pp-reaction-chat-choices">
+        ${choices.map((choice) => `
+          <span>
+            <img src="${escapeHtml(choice.img ?? "icons/svg/item-bag.svg")}" alt="">
+            <strong>${escapeHtml(choice.label ?? "Reaction")}</strong>
+          </span>
+        `).join("")}
+      </div>
+      <footer class="${escapeHtml(status)}"><i class="fas ${statusIcon}"></i><span>${escapeHtml(statusText)}</span></footer>
+    </section>
+  `;
+}
+
+async function createGmReactionChatMessage(actor, details) {
+  return ChatMessage.create({
+    speaker: ChatMessage.getSpeaker({ actor }),
+    whisper: asArray(game.users).filter((candidate) => candidate.isGM).map((candidate) => candidate.id),
+    content: renderGmReactionChatCard(details),
+    flags: {
+      [MODULE_ID]: {
+        reactionPrompt: details
+      }
+    }
+  });
+}
+
+async function updateGmReactionChatMessage(messagePromise, details) {
+  try {
+    const message = await messagePromise;
+    if (!message) return;
+    await message.update({
+      content: renderGmReactionChatCard(details),
+      [`flags.${MODULE_ID}.reactionPrompt`]: details
+    });
+  } catch (error) {
+    console.warn("Player Pilot could not update the GM reaction chat card.", error);
+  }
+}
+
+function syncGmReactionChatCountdown(message, html) {
+  const details = message.getFlag?.(MODULE_ID, "reactionPrompt");
+  if (!details || details.status !== "pending") return;
+  const root = html instanceof HTMLElement ? html : html?.[0];
+  const counter = root?.querySelector?.("[data-pp-reaction-countdown]");
+  if (!counter) return;
+  const tick = () => {
+    if (!counter.isConnected) return;
+    const remaining = reactionSecondsRemaining(details.expiresAt);
+    counter.textContent = `${remaining}s`;
+    if (remaining > 0) window.setTimeout(tick, 250);
+  };
+  tick();
+}
+
+function requestPilotReaction(user, actor, reactions, options = {}) {
+  const requestId = foundry.utils.randomID();
+  const timeoutSeconds = clamp(Number(options.timeout ?? 30), 5, 90);
+  const reactionNames = reactions.map(reactionChoiceLabel).filter(Boolean).join(" / ") || "reaction";
+  const expiresAt = Date.now() + (timeoutSeconds * 1000);
+  const chatDetails = {
+    requestId,
+    userId: String(user.id),
+    userName: String(user.name ?? "Player"),
+    actorName: String(actor.name ?? "Reaction"),
+    prompt: cleanRulesText(options.prompt ?? "Choose whether to use a reaction."),
+    reactionNames,
+    expiresAt,
+    status: "pending",
+    choices: reactions.map((activity) => ({
+      id: String(activity.uuid ?? ""),
+      label: reactionChoiceLabel(activity),
+      img: String(activity.item?.img ?? activity.img ?? "icons/svg/item-bag.svg")
+    }))
+  };
+  const chatMessagePromise = createGmReactionChatMessage(actor, chatDetails).catch((error) => {
+    console.warn("Player Pilot could not create the GM reaction chat card.", error);
+    return null;
+  });
+  ui.notifications?.info?.(`Player Pilot: Waiting for ${user.name} to answer ${actor.name}'s ${reactionNames} reaction (${timeoutSeconds}s).`);
+  return new Promise((resolve) => {
+    const finish = (choiceId = "", resolution = "response") => {
+      const pending = pendingGmReactions.get(requestId);
+      if (!pending) return;
+      pendingGmReactions.delete(requestId);
+      window.clearTimeout(pending.timer);
+      const chosen = reactions.find((activity) => String(activity.uuid ?? "") === String(choiceId ?? ""));
+      const status = chosen
+        ? "accepted"
+        : (resolution === "timeout" ? "timeout" : resolution === "unavailable" ? "unavailable" : "declined");
+      void updateGmReactionChatMessage(chatMessagePromise, {
+        ...chatDetails,
+        status,
+        resultLabel: chosen ? reactionChoiceLabel(chosen) : ""
+      });
+      if (chosen) ui.notifications?.info?.(`Player Pilot: ${user.name} accepted ${reactionChoiceLabel(chosen)}.`);
+      else if (resolution === "timeout") ui.notifications?.warn?.(`Player Pilot: ${user.name} did not answer ${actor.name}'s reaction before the timer expired.`);
+      else if (resolution === "unavailable") ui.notifications?.warn?.(`Player Pilot: ${actor.name}'s reaction prompt could not be delivered to ${user.name}.`);
+      else ui.notifications?.info?.(`Player Pilot: ${user.name} declined ${actor.name}'s reaction.`);
+      resolve(choiceId);
+    };
+    const timer = window.setTimeout(() => finish("", "timeout"), timeoutSeconds * 1000);
+    pendingGmReactions.set(requestId, { userId: String(user.id), resolve: finish, timer });
+    const sent = sendSocket("reactionPrompt", {
+      targetUserIds: [user.id],
+      gmUserId: game.user.id,
+      requestId,
+      actorName: actor.name,
+      timeout: timeoutSeconds,
+      expiresAt,
+      prompt: chatDetails.prompt,
+      choices: chatDetails.choices
+    });
+    if (!sent) finish("", "unavailable");
+  });
+}
+
+async function executePilotReaction(activity, options = {}) {
+  const api = globalThis.MidiQOL;
+  if (!api?.completeActivityUse || !activity) return false;
+  const sourceWorkflow = options.workflow;
+  const sourceTokenUuid = String(
+    sourceWorkflow?.tokenUuid
+    ?? sourceWorkflow?.token?.document?.uuid
+    ?? sourceWorkflow?.token?.uuid
+    ?? ""
+  );
+  const selfTarget = String(activity.target?.affects?.type ?? "").toLowerCase() === "self";
+  const reactionToken = api.getTokenForActor?.(activity.actor ?? activity.item?.actor);
+  const targetUuids = selfTarget
+    ? [reactionToken?.document?.uuid ?? reactionToken?.uuid].filter(Boolean)
+    : [sourceTokenUuid].filter(Boolean);
+  const workflowOptions = {
+    ...(options.workflowOptions ?? {}),
+    autoRollAttack: true,
+    autoRollDamage: "always",
+    fastForwardAttack: true,
+    fastForwardDamage: true,
+    targetConfirmation: "none"
+  };
+  return api.completeActivityUse(activity, {
+    midiOptions: {
+      asUser: game.user,
+      checkGMStatus: false,
+      configureDialog: false,
+      createWorkflow: true,
+      fastForward: true,
+      fastForwardAttack: true,
+      fastForwardDamage: true,
+      ignoreUserTargets: true,
+      isReaction: true,
+      targetUuids,
+      workflowOptions
+    }
+  }, { configure: false }, { systemCard: false });
+}
+
+async function bridgeMidiReactionPrompt(reactions, options = {}) {
+  if (!game.user?.isGM || game.playerPilot?.model?.id !== "dnd5e" || !Array.isArray(reactions) || !reactions.length) return true;
+  const actor = reactions[0]?.actor ?? reactions[0]?.item?.actor;
+  const user = pilotUserForActor(actor);
+  if (!user) return true;
+  const prompt = cleanRulesText(
+    options.workflow?.reactionFlavor
+    ?? options.workflowOptions?.reactionFlavor
+    ?? `${actor.name} can use a reaction.`
+  );
+  const choiceId = await requestPilotReaction(user, actor, reactions, { prompt, timeout: options.timeout });
+  const activity = reactions.find((candidate) => String(candidate.uuid ?? "") === choiceId);
+  if (activity) {
+    try {
+      await executePilotReaction(activity, options);
+    } catch (error) {
+      console.error("Player Pilot GM reaction execution failed.", error);
+      ui.notifications?.error?.(`Player Pilot: ${reactionChoiceLabel(activity)} failed.`);
+    }
+  }
+  return false;
 }
 
 async function gmPf2eItemRoll(data) {
@@ -5397,6 +6079,183 @@ function sceneForPilotTokenRequest(data = {}) {
   return requestedScene && viewedScene && String(requestedScene.id ?? "") === String(viewedScene.id ?? "")
     ? requestedScene
     : (viewedScene ?? requestedScene);
+}
+
+function normalizedTokenRotation(value) {
+  const rotation = Number(value ?? 0);
+  return ((rotation % 360) + 360) % 360;
+}
+
+function openTokenRotationDialog() {
+  if (pilotPaused()) {
+    warnPaused();
+    return;
+  }
+  const token = activeTokenForActor();
+  if (!token) {
+    ui.notifications?.warn?.("No token is available to rotate.");
+    return;
+  }
+  warnOutOfTurn(currentActor(), "rotate");
+  const orientation = movementOrientationForUser();
+  let playerFacing = normalizedTokenRotation(Number(token.rotation ?? 0) - (orientation.upStep * 45));
+  let playerScaleX = Number(token.scaleX ?? 1);
+  if (!Number.isFinite(playerScaleX) || playerScaleX === 0) playerScaleX = 1;
+  const facingLabel = () => directionLabel(MOVEMENT_DIRECTIONS[Math.round(playerFacing / 45) % 8] ?? "up");
+  openModal(`
+    <div class="pp-token-rotation-heading">
+      <i class="fas fa-rotate"></i>
+      <div>
+        <h2>Rotate ${escapeHtml(token.name)}</h2>
+        <p>Touch and drag around the token to choose which way it faces. Tap the token to flip it horizontally.</p>
+      </div>
+    </div>
+    <div class="pp-token-rotation-stage" data-token-rotation-stage role="slider" aria-label="Token facing" aria-valuemin="0" aria-valuemax="359" aria-valuenow="${Math.round(playerFacing)}" tabindex="0">
+      <span class="pp-token-rotation-north"><i class="fas fa-arrow-up"></i> Your Up</span>
+      <span class="pp-token-facing-arrow" data-token-facing-arrow style="transform:rotate(${playerFacing}deg)"><i class="fas fa-caret-up"></i></span>
+      <span class="pp-token-rotation-preview" data-token-rotation-preview style="background-image:url('${escapeHtml(token.img)}');transform:rotate(${playerFacing}deg) scaleX(${playerScaleX})"></span>
+    </div>
+    <div class="pp-token-rotation-readout">
+      <strong data-token-facing-label>${escapeHtml(facingLabel())}</strong>
+      <span data-token-facing-degrees>${Math.round(playerFacing)}&deg; from your Up</span>
+      <span class="pp-token-flip-state ${playerScaleX < 0 ? "" : "hidden"}" data-token-flip-state>Mirrored</span>
+    </div>
+    <p class="pp-token-rotation-note"><i class="fas fa-compass"></i> Your seat calibration is applied when the token is rotated on the Foundry map.</p>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+      <button class="pp-button primary" type="button" data-modal-action="applyRotation"><i class="fas fa-check"></i> Face this way</button>
+    </div>
+  `, {
+    applyRotation: async () => {
+      closeModal();
+      const foundryRotation = normalizedTokenRotation(playerFacing + (orientation.upStep * 45));
+      await rotateActiveToken(foundryRotation, playerScaleX);
+    }
+  });
+
+  const stage = state.modal?.querySelector?.("[data-token-rotation-stage]");
+  if (!(stage instanceof HTMLElement)) return;
+  const updatePreviewTransform = () => {
+    const preview = state.modal?.querySelector?.("[data-token-rotation-preview]");
+    if (preview instanceof HTMLElement) preview.style.transform = `rotate(${playerFacing}deg) scaleX(${playerScaleX})`;
+    state.modal?.querySelector?.("[data-token-flip-state]")?.classList?.toggle?.("hidden", playerScaleX >= 0);
+  };
+  const flipPreview = () => {
+    playerScaleX *= -1;
+    updatePreviewTransform();
+  };
+  const updateFacing = (clientX, clientY) => {
+    const rect = stage.getBoundingClientRect();
+    const dx = clientX - (rect.left + (rect.width / 2));
+    const dy = clientY - (rect.top + (rect.height / 2));
+    if (Math.hypot(dx, dy) < 12) return;
+    playerFacing = normalizedTokenRotation(Math.atan2(dx, -dy) * (180 / Math.PI));
+    const rounded = Math.round(playerFacing);
+    stage.setAttribute("aria-valuenow", String(rounded));
+    const arrow = state.modal?.querySelector?.("[data-token-facing-arrow]");
+    updatePreviewTransform();
+    if (arrow instanceof HTMLElement) arrow.style.transform = `rotate(${playerFacing}deg)`;
+    const label = state.modal?.querySelector?.("[data-token-facing-label]");
+    const degrees = state.modal?.querySelector?.("[data-token-facing-degrees]");
+    if (label) label.textContent = facingLabel();
+    if (degrees) degrees.textContent = `${rounded}° from your Up`;
+  };
+  let pointerGesture = null;
+  stage.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    const dx = event.clientX - (rect.left + (rect.width / 2));
+    const dy = event.clientY - (rect.top + (rect.height / 2));
+    pointerGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      startedOnToken: Math.hypot(dx, dy) <= Math.min(rect.width, rect.height) * 0.23
+    };
+    stage.setPointerCapture?.(event.pointerId);
+    stage.classList.add("dragging");
+    if (!pointerGesture.startedOnToken) updateFacing(event.clientX, event.clientY);
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (!stage.hasPointerCapture?.(event.pointerId)) return;
+    event.preventDefault();
+    if (pointerGesture) {
+      pointerGesture.moved ||= Math.hypot(
+        event.clientX - pointerGesture.startX,
+        event.clientY - pointerGesture.startY
+      ) > 8;
+    }
+    if (!pointerGesture?.startedOnToken || pointerGesture?.moved) updateFacing(event.clientX, event.clientY);
+  });
+  const finishPointer = (event, cancelled = false) => {
+    if (!cancelled && pointerGesture?.pointerId === event.pointerId && pointerGesture.startedOnToken && !pointerGesture.moved) {
+      flipPreview();
+    }
+    if (stage.hasPointerCapture?.(event.pointerId)) stage.releasePointerCapture?.(event.pointerId);
+    stage.classList.remove("dragging");
+    pointerGesture = null;
+  };
+  stage.addEventListener("pointerup", finishPointer);
+  stage.addEventListener("pointercancel", (event) => finishPointer(event, true));
+  stage.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    playerFacing = normalizedTokenRotation(playerFacing + (event.key === "ArrowRight" ? 5 : -5));
+    const rect = stage.getBoundingClientRect();
+    const radius = Math.min(rect.width, rect.height) * 0.4;
+    const radians = playerFacing * (Math.PI / 180);
+    updateFacing(rect.left + (rect.width / 2) + (Math.sin(radians) * radius), rect.top + (rect.height / 2) - (Math.cos(radians) * radius));
+  });
+}
+
+async function rotateActiveToken(rotation, scaleX = 1) {
+  const actor = currentActor();
+  const token = activeTokenForActor(actor?.id);
+  if (!actor || !token) return;
+  const payload = {
+    actorId: actor.id,
+    tokenId: token.id,
+    sceneId: state.scene?.id ?? "",
+    rotation: normalizedTokenRotation(rotation),
+    scaleX: Number(scaleX) < 0 ? -Math.abs(Number(scaleX) || 1) : Math.abs(Number(scaleX) || 1)
+  };
+  if (activeGmIds().length && sendSocket("rotateToken", payload)) {
+    showResultToast(`${token.name} facing updated`, `${Math.round(payload.rotation)}°`);
+    return;
+  }
+  try {
+    const result = await rotateTokenDocument(payload);
+    applyTokenRotationToSceneState(result);
+    queueRender();
+  } catch (error) {
+    console.error("Player Pilot token rotation failed.", error);
+    ui.notifications?.error?.("Player Pilot: Token rotation failed.");
+  }
+}
+
+async function rotateTokenDocument(data = {}) {
+  const tokenDoc = tokenDocForPilotRequest(data);
+  if (!tokenDoc) throw new Error("Token not found.");
+  const rotation = normalizedTokenRotation(data.rotation);
+  const currentScaleX = Number(tokenDoc.texture?.scaleX ?? 1) || 1;
+  const requestedScaleX = Number(data.scaleX);
+  const scaleX = Number.isFinite(requestedScaleX) && requestedScaleX !== 0 ? requestedScaleX : currentScaleX;
+  await tokenDoc.update({ rotation, "texture.scaleX": scaleX });
+  return {
+    tokenId: String(tokenDoc.id ?? ""),
+    sceneId: String(tokenDoc.parent?.id ?? data.sceneId ?? ""),
+    rotation,
+    scaleX
+  };
+}
+
+function applyTokenRotationToSceneState(rotation = {}) {
+  const token = (state.scene?.tokens ?? []).find((candidate) => String(candidate.id ?? "") === String(rotation.tokenId ?? ""));
+  if (token) {
+    token.rotation = Number(rotation.rotation ?? token.rotation ?? 0);
+    token.scaleX = Number(rotation.scaleX ?? token.scaleX ?? 1);
+  }
 }
 
 function tokenDocForPilotRequest(data = {}) {
@@ -6049,6 +6908,8 @@ function createSystemModel() {
 }
 
 function registerHooks() {
+  Hooks.on("midi-qol.ReactionFilter", bridgeMidiReactionPrompt);
+  Hooks.on("renderChatMessageHTML", syncGmReactionChatCountdown);
   Hooks.on("preCreateChatMessage", (message, data) => {
     if (!game.user?.isGM || !gmRollContexts.length) return;
     const actorId = String(data?.speaker?.actor ?? message?.speaker?.actor ?? "");
@@ -6117,6 +6978,7 @@ function registerHooks() {
     if (userIsPilot()) setBootStage(90, "Finishing character data...", 95);
     game.socket?.on?.(SOCKET, handleSocket);
     if (userIsPilot()) {
+      loadSelectedTargets();
       configureDiceOverlay({ getActorId: () => state.actorId });
       configureChatFeed({
         onChange: ({ scrollToBottom = false } = {}) => {

@@ -34,7 +34,7 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
         this.services.openManualRollDialog(button.dataset);
       },
       autoInstruction: function (_event, button) {
-        return this.services.autoRollInstruction(this.item, button.dataset);
+        return this.services.autoRollInstruction(this.item, button.dataset, { button });
       },
       nativeInstruction: function (_event, button) {
         return this.services.runNativeItemRoll(
@@ -88,7 +88,6 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     this.targetInfo = this.targetInfoFor(this.defaultActivityId);
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
     this.spellStep = item.type === "spell" && (!model.usesSpellRanks || this.slots.length > 0);
-    services.clearUseTargets();
   }
 
   get root() {
@@ -170,7 +169,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       rollInstructionsHtml: this.services.renderRollInstructions(this.instructions, true, "data-action"),
       castButtonLabel: this.hasFollowupRolls(this.instructions)
         ? "Use Spell & Continue to Rolls"
-        : "Use Spell"
+        : "Use Spell",
+      outOfTurnWarning: this.services.outOfTurnWarning?.(this.actor) ?? ""
     };
   }
 
@@ -319,18 +319,23 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     } else {
       const limit = Number(this.targetInfo.count ?? 0);
       if (Number.isFinite(limit) && limit > 0 && selected.size >= limit) {
-        ui.notifications?.warn?.(`Select up to ${limit} target${limit === 1 ? "" : "s"}.`);
-        return;
+        if (limit === 1) selected.clear();
+        else {
+          ui.notifications?.warn?.(`Select up to ${limit} targets.`);
+          return;
+        }
       }
       selected.add(tokenId);
     }
 
     this.services.setSelectedTargetSet(sceneId, selected);
     this.services.applyTargetsForCurrentUser(Array.from(selected), sceneId);
-    const selectedNow = selected.has(tokenId);
-    button.closest(".pp-token-row")?.classList.toggle("selected", selectedNow);
-    button.classList.toggle("primary", selectedNow);
-    button.textContent = selectedNow ? "Targeted" : "Target";
+    for (const targetButton of this.root.querySelectorAll("[data-action='modalToggleTarget'][data-token-id]")) {
+      const selectedNow = selected.has(String(targetButton.dataset.tokenId ?? ""));
+      targetButton.closest(".pp-token-row")?.classList.toggle("selected", selectedNow);
+      targetButton.classList.toggle("primary", selectedNow);
+      targetButton.textContent = selectedNow ? "Targeted" : "Target";
+    }
     this.services.updateModalTargetCount(selected.size, this.targetInfo);
     this.refreshSneakAttackChoice(
       this.root.querySelector("[name='activityId']")?.value ?? this.defaultActivityId

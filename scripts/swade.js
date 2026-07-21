@@ -37,7 +37,7 @@ export class SwadeModel extends BaseModel {
     },
     { key: "inventory" },
     { key: "chat" },
-    { key: "dice" },
+    { key: "settings" },
     { key: "map" },
   ]);
 

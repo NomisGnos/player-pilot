@@ -1,5 +1,11 @@
 <div class="pp-dialog">
     <h2>Use {{itemName}}</h2>
+    {{#if outOfTurnWarning}}
+        <div class="pp-out-of-turn-warning" role="status">
+            <i class="fas fa-clock"></i>
+            <div><strong>Out-of-turn action</strong><span>{{outOfTurnWarning}}</span></div>
+        </div>
+    {{/if}}
 
     <div class="pp-use-step {{#unless activityStep}}hidden{{/unless}}" data-use-step="activity">
         <div class="pp-activity-choice-hero">

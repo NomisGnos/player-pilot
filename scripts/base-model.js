@@ -66,9 +66,9 @@ export class BaseModel {
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/chat-view.hbs",
     },
     {
-      key: "dice",
-      label: "Dice",
-      icon: "fa-dice-d20",
+      key: "settings",
+      label: "Settings",
+      icon: "fa-gear",
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dice-view.hbs",
     },
     {

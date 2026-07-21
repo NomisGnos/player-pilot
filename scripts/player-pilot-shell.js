@@ -100,7 +100,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const ownedActors = game.actors.filter(a => a.isOwner);
     this.currentActor = this.getCurrentActor(ownedActors);
 
-    if (this.currentActor || ["chat", "dice"].includes(state.activeTab)) {
+    if (this.currentActor || ["chat", "settings"].includes(state.activeTab)) {
       const activeTab = game.playerPilot.model.getTab(state.activeTab);
       parts.body.template = activeTab.viewTemplate;
     } else {

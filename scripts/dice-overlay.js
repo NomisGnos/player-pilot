@@ -332,6 +332,16 @@ function overlayElement() {
   return document.querySelector(".pp-dice-overlay");
 }
 
+function dismissOverlay(overlay, removeDelay = 550) {
+  if (!(overlay instanceof HTMLElement) || overlay.classList.contains("pp-dice-leaving")) return;
+  removeTimer && window.clearTimeout(removeTimer);
+  overlay.classList.add("pp-dice-leaving");
+  removeTimer = window.setTimeout(() => {
+    overlay.remove();
+    removeTimer = null;
+  }, removeDelay);
+}
+
 function buildOverlay(request) {
   removeTimer && window.clearTimeout(removeTimer);
   removeTimer = null;
@@ -355,6 +365,9 @@ function buildOverlay(request) {
   const blockOverlayInput = (event) => {
     if (event.cancelable) event.preventDefault();
     event.stopPropagation();
+    if (["pointerup", "touchend", "click"].includes(event.type) && overlay.classList.contains("pp-dice-settled")) {
+      dismissOverlay(overlay);
+    }
   };
   for (const eventName of ["pointerdown", "pointerup", "click", "dblclick", "contextmenu", "touchstart", "touchend", "wheel"]) {
     overlay.addEventListener(eventName, blockOverlayInput, { capture: true, passive: false });
@@ -518,7 +531,7 @@ function resultMarkup(summary, index) {
     : (summary.formula ? `<span><b>${escapeHtml(summary.formula)}</b></span>` : "");
   return `
     <article class="pp-dice-result-card" style="--pp-result-delay:${index * 90}ms">
-      <small>RESULT${index ? ` ${index + 1}` : ""}</small>
+      <small>FINAL RESULT${index ? ` ${index + 1}` : ""}</small>
       <strong>${escapeHtml(summary.total)}</strong>
       ${breakdown}
       ${summary.formula ? `<em>${escapeHtml(summary.formula)}</em>` : ""}
@@ -531,8 +544,7 @@ function settleRequest(request, { failed = false } = {}) {
   if (!request.rolls.length && !failed) {
     pending.delete(request.id);
     overlay.classList.remove("pp-dice-rolling");
-    overlay.classList.add("pp-dice-leaving");
-    removeTimer = window.setTimeout(() => overlay.remove(), 350);
+    dismissOverlay(overlay, 350);
     return;
   }
   overlay.classList.remove("pp-dice-rolling");
@@ -551,10 +563,10 @@ function settleRequest(request, { failed = false } = {}) {
     ? request.rolls.map(resultMarkup).join("")
     : (failed ? `<article class="pp-dice-result-card"><small>FAILED</small><strong>×</strong><span><b>${escapeHtml(request.label)}</b></span></article>` : "");
   pending.delete(request.id);
-  removeTimer = window.setTimeout(() => {
-    overlay.classList.add("pp-dice-leaving");
-    window.setTimeout(() => overlay.remove(), 550);
-  }, failed ? 4500 : (request.rolls.length ? 6200 : 1000));
+  removeTimer = window.setTimeout(
+    () => dismissOverlay(overlay),
+    failed ? 4500 : (request.rolls.length ? 6200 : 1000)
+  );
 }
 
 function scheduleSettle(request, options = {}) {

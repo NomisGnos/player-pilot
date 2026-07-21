@@ -4,7 +4,6 @@ import {
   actorHasActiveTurn,
   addLog,
   applyTargetsForCurrentUser,
-  clearUseTargets,
   closeModal,
   displayedTargetTokens,
   executePlayerFirst,
@@ -74,7 +73,7 @@ export class PF2eModel extends BaseModel {
     { key: "spells" },
     { key: "inventory" },
     { key: "chat" },
-    { key: "dice" },
+    { key: "settings" },
     { key: "map" },
   ]);
 
@@ -1289,7 +1288,6 @@ export class PF2eModel extends BaseModel {
 
   async openPf2eStrikeFlowDialog(strikeModel, strikeData) {
     const targetInfo = strikeModel.targetInfo;
-    clearUseTargets();
     const canPickTargets = displayedTargetTokens(state.scene).some((token) => targetInfo.allowSelf || token.actorId !== state.actorId);
     const targetStep = (targetInfo.needsTarget || targetInfo.canTarget) && canPickTargets;
     const rollInstructions = await this.renderPf2eStrikeRollInstructions(strikeModel, strikeData);

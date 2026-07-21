@@ -19,7 +19,7 @@ export class SF2eModel extends PF2eModel {
     { key: "spells" },
     { key: "inventory" },
     { key: "chat" },
-    { key: "dice" },
+    { key: "settings" },
     { key: "map" },
   ]);
 
