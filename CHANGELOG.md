@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.3.2
+- Prevented Foundry whispers from leaking through Player Pilot's bottom result toast or activity log to users who cannot see the message in normal chat.
+
 ## v0.3.1
 - Made AUTO one-shot by removing its button after a successful result, and disabled D&D AUTO rolls out of turn with a live combat-turn notice that unlocks when the actor's turn begins.
 - Cleared each player's previous scene targets when a new targeted use enters target selection, without disturbing other players' queued target proxies, and rejected stale selections above the new action's target limit.

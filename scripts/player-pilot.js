@@ -5058,7 +5058,8 @@ function handleMapSnapshotClick(event, node) {
 function registerChatCapture() {
   Hooks.on("createChatMessage", async (message) => {
     if (!userIsPilot()) return;
-    await captureChatMessage(message);
+    const captured = await captureChatMessage(message);
+    if (!captured) return;
     const rolls = Array.isArray(message.rolls) ? message.rolls : [];
     if (rolls.length) {
       const roll = rolls[0];

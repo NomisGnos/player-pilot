@@ -93,16 +93,20 @@ export async function hydrateChatFeed() {
 }
 
 export async function captureChatMessage(message, { scrollToBottom = true } = {}) {
-  if (!visibleMessage(message)) return;
+  if (!visibleMessage(message)) {
+    removeChatMessage(message);
+    return false;
+  }
   chatState.onRollMessage?.(message);
   const entry = await renderEntry(message);
-  if (!entry) return;
+  if (!entry) return false;
   const current = chatState.entries.findIndex((candidate) => candidate.id === entry.id);
   if (current >= 0) chatState.entries[current] = entry;
   else chatState.entries.push(entry);
   chatState.entries.sort((a, b) => a.timestamp - b.timestamp);
   chatState.entries = chatState.entries.slice(-MAX_CHAT_MESSAGES);
   notifyChanged({ scrollToBottom });
+  return true;
 }
 
 export function removeChatMessage(message) {
