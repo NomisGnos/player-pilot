@@ -1,6 +1,7 @@
 # Changelog
 
 ## v0.3.2
+- Stacked D&D ability scores into one column on phone-width viewports so score and modifier fields no longer overflow or disappear around 431–560px.
 - Prevented Foundry whispers from leaking through Player Pilot's bottom result toast or activity log to users who cannot see the message in normal chat.
 
 ## v0.3.1

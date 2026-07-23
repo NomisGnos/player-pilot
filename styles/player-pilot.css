@@ -3659,7 +3659,7 @@ button.pp-card-img.pp-card-info-btn {
   font-weight: 900;
 }
 
-@media (max-width: 430px) {
+@media (max-width: 560px) {
   .pp-stats-page .pp-ability-grid {
     grid-template-columns: 1fr !important;
   }
