@@ -6773,6 +6773,33 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
 .pp-out-of-turn-warning span { display: block; }
 .pp-out-of-turn-warning span { margin-top: 2px; color: #ead8b4; font-size: 0.78rem; line-height: 1.3; }
 
+.pp-auto-turn-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  color: #fff0c8;
+  background: rgba(143, 91, 23, 0.22);
+  border: 1px solid rgba(244, 198, 109, 0.5);
+  border-radius: var(--pp-radius);
+}
+
+.pp-auto-turn-notice i { color: #f4c66d; }
+.pp-auto-turn-notice span,
+.pp-auto-turn-notice strong { display: block; }
+.pp-auto-turn-notice span { font-size: 0.78rem; line-height: 1.3; }
+.pp-auto-roll-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.42;
+}
+
+.pp-roll-instruction-actions.pp-auto-roll-complete {
+  grid-template-columns: minmax(64px, 1fr) !important;
+}
+
+.pp-auto-roll-complete .pp-auto-roll-result { width: 100%; }
+
 .pp-roll-instruction-actions.pp-auto-roll-actions:has(.pp-auto-roll-result:not(:empty)) {
   grid-template-columns: minmax(84px, 1fr) minmax(64px, auto) !important;
   width: min(226px, 100%);

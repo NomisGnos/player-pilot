@@ -1,6 +1,9 @@
 # Changelog
 
 ## v0.3.1
+- Made AUTO one-shot by removing its button after a successful result, and disabled D&D AUTO rolls out of turn with a live combat-turn notice that unlocks when the actor's turn begins.
+- Cleared each player's previous scene targets when a new targeted use enters target selection, without disturbing other players' queued target proxies, and rejected stale selections above the new action's target limit.
+- Made D&D5e AUTO advance the matching Attack or Damage action on the original system/Midi-QOL chat-card workflow, while automatically fulfilling Chris's Premades manual-roll prompts and leaving the GM's normal chat-card controls available for genuinely manual rolls.
 - Kept each formula AUTO result beside its AUTO/RE-ROLL control so players can refer back to the last total.
 - Added non-blocking out-of-turn warnings using the GM's active-combat snapshot, while continuing to allow movement and actions when turn locking is disabled.
 - Made single-target actions replace a previously selected scene target instead of incorrectly reporting that the one-target limit was already full.

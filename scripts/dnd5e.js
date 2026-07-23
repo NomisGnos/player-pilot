@@ -670,7 +670,15 @@ export class DnD5eModel extends BaseModel {
 
   async useItem(actor, item, options = {}) {
     if (typeof item?.use === "function") {
-      const useOptions = { legacy: false };
+      const useOptions = { legacy: false, subsequentActions: false };
+      if (game.modules.get("midi-qol")?.active) {
+        useOptions.midiOptions = {
+          workflowOptions: {
+            autoRollAttack: false,
+            autoRollDamage: "none"
+          }
+        };
+      }
       const level = Number.parseInt(options.castLevel, 10);
       if (item.type === "spell" && Number.isFinite(level) && level > 0) {
         this.queuePendingCastLevel(item.name, level);
@@ -694,7 +702,8 @@ export class DnD5eModel extends BaseModel {
       }
       const selected = this.selectedItemActivity(item, options.activityId);
       if (selected?.activity && typeof selected.activity.use === "function") {
-        return selected.activity.use(useOptions);
+        const messageOptions = game.modules.get("midi-qol")?.active ? { systemCard: true } : {};
+        return selected.activity.use(useOptions, {}, messageOptions);
       }
       return item.use(useOptions);
     }
@@ -1154,6 +1163,7 @@ export class DnD5eModel extends BaseModel {
         formula: cleanRulesText(this.resolveDisplayFormula(entry.formula ?? "", actor, item, entry.activity)),
         detail: cleanRulesText(entry.detail ?? ""),
         scaled: entry.scaled === true,
+        workflowAction: entry.workflowAction ?? !!entry.activity,
         rollMode: String(entry.rollMode ?? ""),
         rollModeReason: cleanRulesText(entry.rollModeReason ?? "")
       };

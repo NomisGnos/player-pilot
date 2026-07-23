@@ -1,7 +1,7 @@
 import { capitalizeWords, escapeHtml, signedMod } from "./utils.js";
 
 const MODULE_ID = "player-pilot";
-const ROLL_REQUEST_TYPES = new Set(["useItem", "rollCheck", "formulaRoll", "pf2eStrike", "pf2eItemRoll"]);
+const ROLL_REQUEST_TYPES = new Set(["useItem", "rollCheck", "formulaRoll", "dnd5eAutoRoll", "pf2eStrike", "pf2eItemRoll"]);
 const themes = new Map();
 const pending = new Map();
 

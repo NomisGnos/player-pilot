@@ -3136,6 +3136,13 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   const rangeFeetFor = (activityId = "") => model.getItemRangeFeet?.(item, activityId);
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
+  let targetsResetForUse = false;
+  const resetTargetsForUse = () => {
+    if (targetsResetForUse) return;
+    targetsResetForUse = true;
+    clearUseTargets();
+  };
+  if (!activityStep && targetStep) resetTargetsForUse();
   const spellStep = item.type === "spell" && (!model.usesSpellRanks || slots.length > 0);
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
     if (!sneakAttack) return null;
@@ -3208,7 +3215,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   };
   openModal(`
     <h2>Use ${escapeHtml(itemDisplayName(item))}</h2>
-    ${outOfTurnWarning(actor) ? `<div class="pp-out-of-turn-warning" role="status"><i class="fas fa-clock"></i><div><strong>Out-of-turn action</strong><span>${escapeHtml(outOfTurnWarning(actor))}</span></div></div>` : ""}
+    ${outOfTurnWarning(actor) ? `<div class="pp-out-of-turn-warning" data-out-of-turn-warning role="status"><i class="fas fa-clock"></i><div><strong>Out-of-turn action</strong><span>${escapeHtml(outOfTurnWarning(actor))}</span></div></div>` : ""}
     <div class="pp-use-step ${activityStep ? "" : "hidden"}" data-use-step="activity">
       <div class="pp-activity-choice-hero">
         <i class="fas fa-list-check"></i>
@@ -3277,6 +3284,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       const { options } = refreshRollInstructions(modal);
       targetInfo = targetInfoFor(options.activityId);
       targetStep = targetInfo.needsTarget || targetInfo.canTarget;
+      if (targetStep) resetTargetsForUse();
       modal.querySelector("[data-use-step='activity']")?.classList?.add?.("hidden");
       modal.querySelector("[data-modal-action='nextActivityStep']")?.classList?.add?.("hidden");
       const targetSummary = modal.querySelector("[data-modal-target-summary]");
@@ -3334,6 +3342,11 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       const current = selectedTargetSet(state.scene?.id ?? "");
       if (targetInfo.needsTarget && current.size <= 0) {
         ui.notifications?.warn?.("Choose a target first.");
+        return;
+      }
+      const limit = Number(targetInfo.count ?? 0);
+      if (Number.isFinite(limit) && limit > 0 && current.size > limit) {
+        ui.notifications?.warn?.(`Select up to ${limit} targets.`);
         return;
       }
       modal.querySelector("[data-use-step='targets']")?.classList?.add?.("hidden");
@@ -3815,8 +3828,16 @@ function openRollChoiceDialog(data = {}) {
 
 export function renderRollInstructions(instructions = [], allowManual = true, actionAttribute = "data-modal-action") {
   if (!instructions.length) return "";
+  const autoTurnBlocked = dnd5eAutoTurnBlocked();
+  const hasAutoInstructions = allowManual && instructions.some((entry) => !entry.nativeAction && entry.formula);
   return `
     <div class="pp-roll-instructions">
+      ${game.system.id === "dnd5e" && hasAutoInstructions ? `
+        <div class="pp-auto-turn-notice ${autoTurnBlocked ? "" : "hidden"}" data-auto-turn-notice role="status">
+          <i class="fas fa-hourglass-half"></i>
+          <span><strong>AUTO is waiting for your turn</strong>D&amp;D AUTO rolls unlock when this actor becomes the active combatant.</span>
+        </div>
+      ` : ""}
       ${instructions.map((entry) => `
         <article class="pp-roll-instruction pp-roll-choice-hero pp-roll-kind-${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}">
           <img class="pp-instruction-icon" src="${escapeHtml(rollInstructionIcon(entry))}" alt="">
@@ -3837,7 +3858,7 @@ export function renderRollInstructions(instructions = [], allowManual = true, ac
             </div>
           ` : (allowManual && entry.formula ? `
             <div class="pp-roll-instruction-actions pp-auto-roll-actions">
-              <button class="pp-button primary" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}">AUTO</button>
+              <button class="pp-button primary pp-auto-roll-button" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}" data-workflow-action="${entry.workflowAction === false ? "false" : "true"}" ${autoTurnBlocked ? 'disabled aria-disabled="true" title="AUTO unlocks when it is this actor’s turn."' : ""}>AUTO</button>
               <output class="pp-auto-roll-result" data-auto-roll-result aria-live="polite"></output>
             </div>
           ` : "")}
@@ -3932,12 +3953,12 @@ function finishAutoRollControl(data = {}) {
   if (!(button instanceof HTMLElement)) return;
   pendingAutoRollControls.delete(requestId);
   if (String(button.dataset.autoRequestId ?? "") !== requestId) return;
+  const actions = button.closest(".pp-auto-roll-actions");
   button.disabled = false;
-  button.closest(".pp-auto-roll-actions")?.classList.remove("rolling");
+  actions?.classList.remove("rolling");
   const totals = asArray(data.rolls).map((roll) => Number(roll?.total)).filter(Number.isFinite);
-  const result = button.closest(".pp-auto-roll-actions")?.querySelector("[data-auto-roll-result]");
+  const result = actions?.querySelector("[data-auto-roll-result]");
   if (totals.length) {
-    button.textContent = "RE-ROLL";
     if (result instanceof HTMLElement) {
       result.replaceChildren();
       const label = document.createElement("span");
@@ -3946,10 +3967,19 @@ function finishAutoRollControl(data = {}) {
       value.textContent = totals.join(" / ");
       result.append(label, value);
     }
+    actions?.classList.add("pp-auto-roll-complete");
+    button.remove();
     return;
   }
-  button.textContent = data.failed === true ? "AUTO" : "RE-ROLL";
-  if (result instanceof HTMLElement) result.textContent = data.failed === true ? "Roll failed" : "Completed";
+  if (data.failed === true) {
+    button.textContent = "AUTO";
+    if (result instanceof HTMLElement) result.textContent = "Roll failed";
+    syncDnd5eAutoTurnControls();
+    return;
+  }
+  if (result instanceof HTMLElement) result.textContent = "Completed";
+  actions?.classList.add("pp-auto-roll-complete");
+  button.remove();
 }
 
 async function autoRollInstruction(item, data = {}, control = {}) {
@@ -3960,6 +3990,11 @@ async function autoRollInstruction(item, data = {}, control = {}) {
   const actor = currentActor();
   const formula = String(data.formula ?? "").trim();
   if (!actor || !formula) return;
+  if (dnd5eAutoTurnBlocked(actor)) {
+    ui.notifications?.warn?.("D&D AUTO rolls unlock when it is this actor's turn.");
+    syncDnd5eAutoTurnControls();
+    return;
+  }
   warnOutOfTurn(actor, "roll");
   const kind = String(data.rollKind ?? "").toLowerCase();
   const requestId = foundry.utils.randomID();
@@ -3971,11 +4006,17 @@ async function autoRollInstruction(item, data = {}, control = {}) {
     label: String(data.name ?? "Roll"),
     rollLabel: String(data.name ?? "Roll"),
     rollKind: kind,
+    activityId: String(control.options?.activityId ?? ""),
+    useRequestId: String(control.useRequestId ?? ""),
     sceneId: state.scene?.id ?? "",
     targetIds: Array.from(selectedTargetSet(state.scene?.id ?? ""))
   };
   beginAutoRollControl(control.button, requestId);
-  if (activeGmIds().length && sendSocket("formulaRoll", payload)) {
+  const useDnd5eWorkflow = game.system.id === "dnd5e"
+    && data.workflowAction !== "false"
+    && ["attack", "damage", "healing"].includes(kind);
+  const socketType = useDnd5eWorkflow ? "dnd5eAutoRoll" : "formulaRoll";
+  if (activeGmIds().length && sendSocket(socketType, payload)) {
     showResultToast(`${payload.label} sent`, formula);
     return requestId;
   }
@@ -4001,7 +4042,7 @@ async function rollFormulaForActor(actor, data = {}) {
   return roll;
 }
 
-function openRollReminderDialog(item, actor, options = {}) {
+function openRollReminderDialog(item, actor, options = {}, useRequestId = "") {
   const instructions = game.playerPilot.model.collectRollInstructions(item, options);
   if (!instructions.length) return;
   openModal(`
@@ -4016,7 +4057,7 @@ function openRollReminderDialog(item, actor, options = {}) {
       openManualRollDialog(button.dataset);
     },
     autoInstruction: async (_modal, button) => {
-      await autoRollInstruction(item, button.dataset, { button });
+      await autoRollInstruction(item, button.dataset, { button, options, useRequestId });
     },
     nativeInstruction: async (_modal, button) => {
       await runNativeItemRoll(item, button.dataset.nativeAction ?? "", button.dataset.castRank, button.dataset.attackNumber);
@@ -4071,9 +4112,27 @@ export function actorHasActiveTurn(actor) {
   return getActorTokenCandidates(actor.id).some((token) => token.id === activeTokenId);
 }
 
+function dnd5eAutoTurnBlocked(actor = currentActor()) {
+  return game.system.id === "dnd5e" && !!actor && !actorHasActiveTurn(actor);
+}
+
+function syncDnd5eAutoTurnControls(root = document) {
+  const blocked = dnd5eAutoTurnBlocked();
+  for (const button of root.querySelectorAll?.(".pp-auto-roll-button") ?? []) {
+    const rolling = !!String(button.dataset.autoRequestId ?? "")
+      && pendingAutoRollControls.has(String(button.dataset.autoRequestId));
+    button.disabled = blocked || rolling;
+    button.setAttribute("aria-disabled", String(blocked || rolling));
+    button.title = blocked ? "AUTO unlocks when it is this actor's turn." : "";
+  }
+  for (const notice of root.querySelectorAll?.("[data-auto-turn-notice], [data-out-of-turn-warning]") ?? []) {
+    notice.classList.toggle("hidden", !blocked);
+  }
+}
+
 function outOfTurnWarning(actor = currentActor()) {
   return actor && !actorHasActiveTurn(actor)
-    ? "You may proceed, but it is not your turn in the active combat."
+    ? "It is not your turn. You may prepare targets, move, or use an action, but D&D AUTO rolls unlock on your turn."
     : "";
 }
 
@@ -4142,17 +4201,19 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   }
   const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
   if (activeGmIds().length) {
+    const useRequestId = foundry.utils.randomID();
     sendSocket("useItem", {
       actorId: actor.id,
       itemId,
       rollLabel: itemDisplayName(item),
       options,
+      useRequestId,
       sceneId: state.scene?.id ?? "",
       targetIds
     });
     showResultToast(`${itemDisplayName(item)} sent`, targetIds.length ? `${targetIds.length} target${targetIds.length === 1 ? "" : "s"}` : "");
-    if (uiOptions.showReminder !== false) openRollReminderDialog(item, actor, options);
-    return;
+    if (uiOptions.showReminder !== false) openRollReminderDialog(item, actor, options, useRequestId);
+    return useRequestId;
   }
   await executePlayerFirst(
     `Use ${item.name}`,
@@ -5066,6 +5127,7 @@ async function handlePlayerSocket(data) {
     state.sceneFingerprint = fingerprint;
     state.lastSceneReceivedAt = Date.now();
     if (!state.selectedTokenId) activeTokenForActor();
+    syncDnd5eAutoTurnControls();
     if (!changed) return;
     if (shouldDelaySceneRender()) return;
     queueRender();
@@ -5117,6 +5179,9 @@ async function handlePlayerSocket(data) {
 
 const gmProxyTargets = new Map();
 const gmRollContexts = [];
+const gmDnd5eUses = new Map();
+const gmDnd5eAutoContexts = [];
+let gmDnd5eAutoQueue = Promise.resolve();
 const cprPromptUsersByActor = new Map();
 const pendingGmReactions = new Map();
 const gmMapSnapshots = new Map();
@@ -5138,7 +5203,7 @@ async function handleGmSocket(data) {
     sendSceneState(data.userId, true);
     return;
   }
-  if (game.paused === true && ["targetUpdate", "moveToken", "rotateToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
+  if (game.paused === true && ["targetUpdate", "moveToken", "rotateToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "dnd5eAutoRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
     sendSocket("commandResult", { targetUserIds: [data.userId], requestId: data.requestId, message: "Game paused", failed: true });
     return;
   }
@@ -5233,6 +5298,14 @@ async function handleGmSocket(data) {
     }, data);
     return;
   }
+  if (data.type === "dnd5eAutoRoll") {
+    const run = gmDnd5eAutoQueue.catch(() => undefined).then(() => (
+      gmRun(data.label || "D&D5e AUTO", data.userId, () => gmDnd5eAutoRoll(data), data)
+    ));
+    gmDnd5eAutoQueue = run;
+    await run;
+    return;
+  }
   if (data.type === "rest") {
     await gmRun(`${data.restType} rest`, data.userId, () => gmRest(data));
     return;
@@ -5281,7 +5354,7 @@ async function gmRun(label, userId, fn, request = {}) {
       seenRolls.add(key);
       return true;
     });
-    if (["formulaRoll", "rollCheck"].includes(request.type) && rolls.length) {
+    if (["formulaRoll", "dnd5eAutoRoll", "rollCheck"].includes(request.type) && rolls.length) {
       await createGmRollAuditMessage(label, userId, request, rolls);
     }
     sendSocket("commandResult", {
@@ -5424,6 +5497,428 @@ function renderGmActionNotice({ requester, actor, item, data }) {
   };
 }
 
+function gmDnd5eLatestUseKey(data = {}) {
+  return `latest:${String(data.userId ?? "")}:${String(data.actorId ?? "")}:${String(data.itemId ?? "")}`;
+}
+
+function pruneGmDnd5eUses() {
+  const cutoff = Date.now() - (30 * 60 * 1000);
+  for (const [key, record] of gmDnd5eUses.entries()) {
+    if (Number(record?.at ?? 0) < cutoff) gmDnd5eUses.delete(key);
+  }
+}
+
+function dnd5eUsageMessage(result) {
+  const candidates = [result?.message, result?.result?.message, result];
+  return candidates.find((candidate) => candidate?.documentName === "ChatMessage" || candidate instanceof ChatMessage) ?? null;
+}
+
+function midiWorkflowForMessage(message) {
+  const Workflow = globalThis.MidiQOL?.Workflow;
+  if (!message || typeof Workflow?.getWorkflow !== "function") return null;
+  return Workflow.getWorkflow(message.uuid)
+    ?? Workflow.getWorkflow(message.id)
+    ?? null;
+}
+
+function rememberGmDnd5eUse(data, result) {
+  if (game.system.id !== "dnd5e") return null;
+  pruneGmDnd5eUses();
+  const message = dnd5eUsageMessage(result);
+  if (!message) return null;
+  const record = {
+    at: Date.now(),
+    userId: String(data.userId ?? ""),
+    actorId: String(data.actorId ?? ""),
+    itemId: String(data.itemId ?? ""),
+    activityId: String(data.options?.activityId ?? message.flags?.dnd5e?.activity?.id ?? ""),
+    message,
+    workflow: midiWorkflowForMessage(message)
+  };
+  const requestId = String(data.useRequestId ?? "");
+  if (requestId) gmDnd5eUses.set(requestId, record);
+  gmDnd5eUses.set(gmDnd5eLatestUseKey(data), record);
+  return record;
+}
+
+async function waitForGmDnd5eUse(data, timeoutMs = 12000) {
+  const requestId = String(data.useRequestId ?? "");
+  const latestKey = gmDnd5eLatestUseKey(data);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const record = (requestId ? gmDnd5eUses.get(requestId) : null) ?? gmDnd5eUses.get(latestKey);
+    if (record?.message) {
+      record.workflow ??= midiWorkflowForMessage(record.message);
+      return record;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
+}
+
+function cprSetting(key, fallback = null) {
+  if (!game.modules.get("chris-premades")?.active) return fallback;
+  try {
+    return game.settings.get("chris-premades", key);
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function actorHasPlayerOwner(actor) {
+  if (actor?.hasPlayerOwner === true) return true;
+  return asArray(game.users).some((user) => !user.isGM && Number(actor?.ownership?.[user.id] ?? 0) >= OWNER);
+}
+
+function cprManualDamageExpected(workflow) {
+  if (!workflow || cprSetting("manualRollsEnabled", false) !== true) return false;
+  const users = cprSetting("manualRollsUsers", {});
+  if (users && users[game.user.id] !== true) return false;
+  const inclusion = Number(cprSetting("manualRollsInclusion", 0));
+  if (inclusion === 0) return false;
+  const actor = workflow.actor;
+  if (inclusion === 2 && actor?.type !== "character") return false;
+  if (inclusion === 3 && actor?.prototypeToken?.actorLink !== true) return false;
+  if (inclusion === 4 && (actor?.prototypeToken?.actorLink !== true || !actorHasPlayerOwner(actor))) return false;
+  if (inclusion === 5 && !actorHasPlayerOwner(actor)) return false;
+  if (!(workflow.hitTargets?.size > 0) && cprSetting("manualRollsPromptOnMiss", false) !== true) return false;
+  return true;
+}
+
+function rollDamageType(roll) {
+  return String(roll?.options?.type ?? roll?.options?.flavor ?? "none");
+}
+
+function rollDiceOnlyTotal(roll) {
+  const summary = rollSummariesFrom(roll)[0];
+  return Number.isFinite(Number(summary?.dieTotal)) ? Number(summary.dieTotal) : Number(roll?.total ?? 0);
+}
+
+async function fillCprDamageResolver(app, context) {
+  const rolls = asArray(context.workflow?.damageRolls?.length ? context.workflow.damageRolls : context.nativeRolls);
+  const inputs = Array.from(app.element?.querySelectorAll?.("#cpr-roll-resolver input[name]") ?? []);
+  if (!rolls.length || !inputs.length) {
+    await app.digitalRoll();
+    return;
+  }
+  const diceOnly = cprSetting("manualRollsInputDiceOnly", false) === true;
+  for (const input of inputs) {
+    const type = String(input.name ?? input.id ?? "none");
+    let matching = rolls.filter((roll) => rollDamageType(roll) === type);
+    if (!matching.length && inputs.length === 1) matching = rolls;
+    if (!matching.length) {
+      await app.digitalRoll();
+      return;
+    }
+    const value = matching.reduce((total, roll) => (
+      total + (diceOnly ? rollDiceOnlyTotal(roll) : Number(roll?.total ?? 0))
+    ), 0);
+    input.value = String(value);
+  }
+}
+
+function resolveGmDnd5eAutoContext(context) {
+  if (context.cprResolved) return;
+  context.cprResolved = true;
+  context.resolveCpr?.();
+}
+
+function cprResolverActorUuids(app) {
+  const rolls = Array.isArray(app?.rolls) ? app.rolls : [app?.roll];
+  return new Set(rolls.flatMap((roll) => [
+    roll?.data?.actorUuid,
+    roll?.options?.actorUuid,
+    roll?.options?.data?.actorUuid
+  ]).filter(Boolean).map(String));
+}
+
+function autoResolveCprRollResolver(app) {
+  if (!game.user?.isGM || !app?.element?.querySelector?.("#cpr-roll-resolver") || typeof app.digitalRoll !== "function") return;
+  const multiple = Array.isArray(app.rolls);
+  const actorUuids = cprResolverActorUuids(app);
+  const context = [...gmDnd5eAutoContexts].reverse().find((candidate) => (
+    !candidate.cprClaimed
+    && (multiple ? ["damage", "healing"].includes(candidate.kind) : candidate.kind === "attack")
+    && (!actorUuids.size || actorUuids.has(candidate.actorUuid))
+  ));
+  if (!context) return;
+  context.cprClaimed = true;
+  Promise.resolve().then(async () => {
+    try {
+      if (multiple) await fillCprDamageResolver(app, context);
+      else await app.digitalRoll();
+      await app.close();
+    } catch (error) {
+      console.error("Player Pilot could not automatically fulfill the CPR roll resolver.", error);
+      try {
+        await app.digitalRoll();
+        await app.close();
+      } catch (_err) {
+        // Leave CPR's resolver available to the GM if its own fallback also fails.
+      }
+    } finally {
+      resolveGmDnd5eAutoContext(context);
+    }
+  });
+}
+
+function dnd5eFastForwardEvent() {
+  try {
+    return new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true });
+  } catch (_err) {
+    return { shiftKey: true };
+  }
+}
+
+function dnd5eOriginMessageConfig(message) {
+  return {
+    create: true,
+    data: {
+      flags: {
+        dnd5e: {
+          originatingMessage: message?.id ?? ""
+        }
+      }
+    }
+  };
+}
+
+function dnd5eCoreDamageConfig(message) {
+  const lastAttack = message?.getAssociatedRolls?.("attack")?.pop?.();
+  const attackMode = lastAttack?.getFlag?.("dnd5e", "roll.attackMode");
+  let ammunition;
+  const actor = lastAttack?.getAssociatedActor?.();
+  if (actor) {
+    const storedData = lastAttack.getFlag?.("dnd5e", "roll.ammunitionData");
+    ammunition = storedData
+      ? new Item.implementation(storedData, { parent: actor })
+      : actor.items.get(lastAttack.getFlag?.("dnd5e", "roll.ammunition"));
+  }
+  return {
+    ammunition,
+    attackMode,
+    isCritical: lastAttack?.rolls?.[0]?.isCritical === true
+  };
+}
+
+function workflowAt(workflow, stateName) {
+  return !!workflow && workflow.currentAction === workflow[stateName];
+}
+
+function dnd5eCardAction(rollKind) {
+  if (rollKind === "attack") return "rollAttack";
+  if (rollKind === "healing") return "rollHealing";
+  return "rollDamage";
+}
+
+function dnd5eCardElements(message) {
+  const id = String(message?.id ?? "");
+  if (!id) return [];
+  const escaped = globalThis.CSS?.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+  return Array.from(document.querySelectorAll(`[data-message-id="${escaped}"]`));
+}
+
+function findDnd5eCardActionButton(message, rollKind) {
+  const action = dnd5eCardAction(rollKind);
+  const selectors = [`[data-action="${action}"]`];
+  if (rollKind === "healing") selectors.push('[data-action="rollDamage"]');
+  for (const element of dnd5eCardElements(message)) {
+    for (const selector of selectors) {
+      const button = element.querySelector(selector);
+      if (button instanceof HTMLElement && !button.disabled) return button;
+    }
+  }
+  return null;
+}
+
+async function waitForDnd5eCardActionButton(message, rollKind, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const button = findDnd5eCardActionButton(message, rollKind);
+    if (button) return button;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
+}
+
+function dnd5eAssociatedRollMessages(message, rollKind) {
+  const types = rollKind === "attack"
+    ? ["attack"]
+    : (rollKind === "healing" ? ["healing", "damage"] : ["damage"]);
+  return types.flatMap((type) => asArray(message?.getAssociatedRolls?.(type)));
+}
+
+function dnd5eAssociatedRolls(message, rollKind, priorIds = new Set()) {
+  return dnd5eAssociatedRollMessages(message, rollKind)
+    .filter((entry) => !priorIds.has(String(entry?.id ?? entry?.uuid ?? "")))
+    .flatMap((entry) => asArray(entry?.rolls?.length ? entry.rolls : entry?.roll));
+}
+
+function dnd5eAttackWorkflowSettled(workflow) {
+  if (!workflow) return true;
+  return [
+    "WorkflowState_WaitForDamageRoll",
+    "WorkflowState_WaitForUtilityRoll",
+    "WorkflowState_WaitForSaves",
+    "WorkflowState_ConfirmRoll",
+    "WorkflowState_RollFinished",
+    "WorkflowState_Completed",
+    "WorkflowState_Abort"
+  ].some((stateName) => workflowAt(workflow, stateName));
+}
+
+async function runDnd5eCardAutoRoll(message, workflow, data) {
+  const button = await waitForDnd5eCardActionButton(message, data.rollKind);
+  if (!button) return null;
+  const priorMessageIds = new Set(dnd5eAssociatedRollMessages(message, data.rollKind)
+    .map((entry) => String(entry?.id ?? entry?.uuid ?? "")));
+  const priorAttack = workflow?.attackRoll;
+  const priorDamage = asArray(workflow?.damageRolls);
+  const priorDamageCount = Number(workflow?.damageRollCount ?? 0);
+  const event = dnd5eFastForwardEvent();
+  button.dispatchEvent(event);
+
+  const deadline = Date.now() + 65000;
+  let completedResult = null;
+  while (Date.now() < deadline) {
+    if (data.rollKind === "attack" && workflow?.attackRoll && workflow.attackRoll !== priorAttack) {
+      completedResult = workflow.attackRoll;
+    }
+    if (["damage", "healing"].includes(data.rollKind) && workflow?.damageRolls?.length) {
+      const changed = Number(workflow.damageRollCount ?? 0) > priorDamageCount
+        || workflow.damageRolls.length !== priorDamage.length
+        || workflow.damageRolls.some((roll, index) => roll !== priorDamage[index]);
+      if (changed) completedResult = workflow.damageRolls;
+    }
+    const associated = dnd5eAssociatedRolls(message, data.rollKind, priorMessageIds);
+    if (associated.length) completedResult ??= associated;
+    if (completedResult && (data.rollKind !== "attack" || dnd5eAttackWorkflowSettled(workflow))) {
+      return completedResult;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`The ${data.rollKind} action was pressed on the D&D5e chat card, but no roll completed.`);
+}
+
+async function waitForCprDamageResolution(workflow, context) {
+  if (!cprManualDamageExpected(workflow) || context.cprResolved) return;
+  await Promise.race([
+    context.cprPromise,
+    new Promise((resolve) => setTimeout(resolve, 10000))
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function runDnd5eWorkflowAutoRoll(activity, workflow, message, data, context) {
+  if (data.rollKind === "attack") {
+    if (!data.reroll && workflow.attackRoll) return workflow.attackRoll;
+    if (!workflowAt(workflow, "WorkflowState_WaitForAttackRoll")) {
+      if (data.reroll) return runDnd5eCoreAutoRoll(activity, message, data, context);
+      if (workflow.attackRoll) return workflow.attackRoll;
+      throw new Error("The Midi-QOL workflow is not waiting for its attack roll.");
+    }
+    const cardResult = await runDnd5eCardAutoRoll(message, workflow, data);
+    if (cardResult) return cardResult;
+    const event = dnd5eFastForwardEvent();
+    return activity.rollAttack({
+      event,
+      workflow,
+      midiOptions: {
+        ...(workflow.rollOptions ?? {}),
+        workflowOptions: workflow.workflowOptions ?? {}
+      }
+    }, { configure: false }, {});
+  }
+
+  if (!["damage", "healing"].includes(data.rollKind)) {
+    throw new Error(`The ${data.rollKind || "requested"} roll is not a D&D5e attack or damage step.`);
+  }
+  if (!data.reroll && workflow.damageRolls?.length) return workflow.damageRolls;
+  if (!workflowAt(workflow, "WorkflowState_WaitForDamageRoll")) {
+    if (data.reroll) return runDnd5eCoreAutoRoll(activity, message, data, context);
+    if (workflow.damageRolls?.length) return workflow.damageRolls;
+    throw new Error("The Midi-QOL workflow is not waiting for its damage or healing roll.");
+  }
+  const cardResult = await runDnd5eCardAutoRoll(message, workflow, data);
+  if (cardResult) {
+    await waitForCprDamageResolution(workflow, context);
+    return workflow.damageRolls?.length ? workflow.damageRolls : cardResult;
+  }
+  const event = dnd5eFastForwardEvent();
+  const result = await activity.rollDamage({
+    event,
+    workflow,
+    midiOptions: {
+      isCritical: workflow.workflowOptions?.isCritical || workflow.isCritical,
+      workflowOptions: workflow.workflowOptions ?? {}
+    }
+  }, { configure: false }, message);
+  context.nativeRolls = asArray(result);
+  await waitForCprDamageResolution(workflow, context);
+  return workflow.damageRolls?.length ? workflow.damageRolls : result;
+}
+
+async function runDnd5eCoreAutoRoll(activity, message, data, context) {
+  if (!data.reroll) {
+    const cardResult = await runDnd5eCardAutoRoll(message, null, data);
+    if (cardResult) return cardResult;
+  }
+  const event = dnd5eFastForwardEvent();
+  if (data.rollKind === "attack") {
+    return activity.rollAttack({ event }, { configure: false }, dnd5eOriginMessageConfig(message));
+  }
+  if (["damage", "healing"].includes(data.rollKind)) {
+    const result = await activity.rollDamage(
+      { event, ...dnd5eCoreDamageConfig(message) },
+      { configure: false },
+      dnd5eOriginMessageConfig(message)
+    );
+    context.nativeRolls = asArray(result);
+    return result;
+  }
+  throw new Error(`The ${data.rollKind || "requested"} roll is not a D&D5e attack or damage step.`);
+}
+
+async function gmDnd5eAutoRoll(data) {
+  if (game.system.id !== "dnd5e") throw new Error("D&D5e is not the active system.");
+  data = { ...data, rollKind: String(data.rollKind ?? "").toLowerCase() };
+  const actor = gmActor(data.actorId);
+  const item = actor?.items?.get?.(data.itemId);
+  if (!actor || !item) throw new Error("Actor or item not found.");
+  const record = await waitForGmDnd5eUse(data);
+  if (!record?.message) throw new Error("The matching D&D5e use card is not ready. Press USE again, then AUTO.");
+  const workflow = record.workflow ?? midiWorkflowForMessage(record.message);
+  const activityId = String(data.activityId ?? record.activityId ?? "");
+  const activity = workflow?.activity
+    ?? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity;
+  if (!activity) throw new Error("The matching D&D5e activity was not found.");
+
+  let resolveCpr;
+  const context = {
+    actorId: actor.id,
+    actorUuid: actor.uuid,
+    itemId: item.id,
+    kind: data.rollKind,
+    workflow,
+    nativeRolls: [],
+    cprClaimed: false,
+    cprResolved: false,
+    cprPromise: new Promise((resolve) => { resolveCpr = resolve; }),
+    resolveCpr: () => resolveCpr?.()
+  };
+  gmDnd5eAutoContexts.push(context);
+  try {
+    return await withProxyTargetsForUser(data.userId, () => (
+      workflow
+        ? runDnd5eWorkflowAutoRoll(activity, workflow, record.message, data, context)
+        : runDnd5eCoreAutoRoll(activity, record.message, data, context)
+    ));
+  } finally {
+    const index = gmDnd5eAutoContexts.indexOf(context);
+    if (index >= 0) gmDnd5eAutoContexts.splice(index, 1);
+  }
+}
+
 async function gmUseItem(data) {
   const actor = gmActor(data.actorId);
   const item = actor?.items?.get?.(data.itemId);
@@ -5464,7 +5959,9 @@ async function gmUseItem(data) {
       }
     }
   });
-  return withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
+  const result = await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
+  rememberGmDnd5eUse(data, result);
+  return result;
 }
 
 function openPilotReactionPrompt(data = {}) {
@@ -6937,6 +7434,7 @@ function registerHooks() {
     if (context) context.rolls.push(...rollSummariesFrom(message.rolls));
   });
   Hooks.on("renderUserConfig", closePilotUserConfiguration);
+  Hooks.on("renderApplicationV2", autoResolveCprRollResolver);
   Hooks.on("renderApplicationV2", closePilotUserConfiguration);
   Hooks.on("renderApplicationV2", surfacePilotPrompt);
   Hooks.on("closeApplicationV2", () => window.queueMicrotask(syncPilotPromptBackdrop));

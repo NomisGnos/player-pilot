@@ -34,7 +34,11 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
         this.services.openManualRollDialog(button.dataset);
       },
       autoInstruction: function (_event, button) {
-        return this.services.autoRollInstruction(this.item, button.dataset, { button });
+        return this.services.autoRollInstruction(this.item, button.dataset, {
+          button,
+          options: this.lastUseOptions ?? this.readUseOptions(),
+          useRequestId: this.useRequestId ?? ""
+        });
       },
       nativeInstruction: function (_event, button) {
         return this.services.runNativeItemRoll(
@@ -87,6 +91,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       : null;
     this.targetInfo = this.targetInfoFor(this.defaultActivityId);
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
+    this.targetsResetForUse = false;
+    if (!this.activityStep && this.targetStep) this.resetTargetsForUse();
     this.spellStep = item.type === "spell" && (!model.usesSpellRanks || this.slots.length > 0);
   }
 
@@ -111,6 +117,12 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
 
   targetInfoFor(activityId = "") {
     return this.model.itemTargetInfo(this.item, activityId);
+  }
+
+  resetTargetsForUse() {
+    if (this.targetsResetForUse) return;
+    this.targetsResetForUse = true;
+    this.services.clearUseTargets();
   }
 
   rangeFeetFor(activityId = "") {
@@ -248,7 +260,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   async finishUseFlow(options, currentInstructions) {
-    await this.services.useItem(this.item.id, options, { showReminder: false });
+    this.lastUseOptions = options;
+    this.useRequestId = await this.services.useItem(this.item.id, options, { showReminder: false });
     const placementNeeded = this.services.itemRequiresMapPlacement(this.item, options.activityId);
     if (!this.hasFollowupRolls(currentInstructions) && !placementNeeded) {
       await this.close();
@@ -282,6 +295,7 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     const { options } = this.refreshRollInstructions();
     this.targetInfo = this.targetInfoFor(options.activityId);
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
+    if (this.targetStep) this.resetTargetsForUse();
     this.root.querySelector("[data-use-step='activity']")?.classList.add("hidden");
     this.root.querySelector("[data-action='nextActivityStep']")?.classList.add("hidden");
 
@@ -352,6 +366,11 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     const current = this.services.selectedTargetSet(this.services.sceneId());
     if (this.targetInfo.needsTarget && current.size <= 0) {
       ui.notifications?.warn?.("Choose a target first.");
+      return;
+    }
+    const limit = Number(this.targetInfo.count ?? 0);
+    if (Number.isFinite(limit) && limit > 0 && current.size > limit) {
+      ui.notifications?.warn?.(`Select up to ${limit} targets.`);
       return;
     }
     this.root.querySelector("[data-use-step='targets']")?.classList.add("hidden");
