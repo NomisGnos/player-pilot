@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- Measured targeting and proximity from the nearest occupied grid spaces of both tokens, so Large, Huge, Gargantuan, and custom 3x3 tokens no longer use their center for PF2e or D&D5e range checks; PF2e strikes now also request the system's attack reach so weapon Reach and longer reach effects are honored.
+- Added live D&D5e resource context to Player Pilot reaction prompts and compatible native follow-up dialogs, including activity uses, shared item pools such as Channel Divinity, remaining spell slots, reset timing, and cantrip/at-will status read from Foundry system data.
+- Kept D&D5e AUTO available outside the actor's turn for opportunity attacks, reactions, and triggered features while retaining a clear out-of-turn notice.
+
 ## v0.3.2
 - Stacked D&D ability scores into one column on phone-width viewports so score and modifier fields no longer overflow or disappear around 431–560px.
 - Prevented Foundry whispers from leaking through Player Pilot's bottom result toast or activity log to users who cannot see the message in normal chat.

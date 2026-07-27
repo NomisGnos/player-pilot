@@ -5650,6 +5650,88 @@ body.player-pilot-active #notifications > .notification.error {
   text-align: center;
 }
 
+.pp-reaction-resource-context {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px;
+  color: var(--pp-text);
+  background: rgba(77, 137, 181, 0.1);
+  border: 1px solid rgba(126, 192, 239, 0.3);
+  border-radius: 7px;
+  text-align: left;
+}
+
+.pp-reaction-resource-context > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #bde3fa;
+  font-size: 0.8rem;
+}
+
+.pp-reaction-resource-group {
+  display: grid;
+  gap: 5px;
+}
+
+.pp-reaction-resource-group > b {
+  color: #dceef9;
+  font-size: 0.76rem;
+}
+
+.pp-reaction-resource {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.pp-reaction-resource > i {
+  color: #7ec7ef;
+  text-align: center;
+}
+
+.pp-reaction-resource span,
+.pp-reaction-resource strong,
+.pp-reaction-resource small {
+  display: block;
+  min-width: 0;
+}
+
+.pp-reaction-resource strong {
+  color: #eff8fc;
+  font-size: 0.82rem;
+}
+
+.pp-reaction-resource small {
+  color: #c7d9e3;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.pp-reaction-resource small em {
+  color: #9fc1d3;
+  font-style: normal;
+}
+
+.pp-reaction-resource-context.compact {
+  gap: 3px;
+  margin-top: 3px;
+  padding: 4px 6px;
+  background: rgba(77, 137, 181, 0.08);
+}
+
+.pp-reaction-resource-context.compact .pp-reaction-resource {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 4px;
+}
+
+.pp-reaction-resource-context.compact .pp-reaction-resource strong,
+.pp-reaction-resource-context.compact .pp-reaction-resource small {
+  font-size: 0.68rem;
+  white-space: normal;
+}
+
 .pp-reaction-choices {
   display: grid;
   gap: 8px;
@@ -5796,6 +5878,15 @@ body.player-pilot-active #notifications > .notification.error {
   font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-message .pp-reaction-chat-choices .pp-reaction-resource-context {
+  color: #e9f7f4;
+  border-color: rgba(126, 192, 239, 0.18);
+}
+
+body.player-pilot-active .pp-native-prompt .pp-reaction-resource-context {
+  margin-top: 12px;
 }
 
 .chat-message .pp-reaction-chat-card > footer {

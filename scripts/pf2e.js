@@ -1522,7 +1522,7 @@ export class PF2eModel extends BaseModel {
     const rangeFeet = Number(
       item?.maxRange
       ?? (Number(item?.system?.range) > 0 ? Number(item.system.range) * 6 : null)
-      ?? item?.actor?.getReach?.({ weapon: item })
+      ?? item?.actor?.getReach?.({ action: "attack", weapon: item })
       ?? 5
     );
     return {

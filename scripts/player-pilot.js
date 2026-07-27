@@ -5,6 +5,7 @@ import { PlayerPilotShell } from "./player-pilot-shell.js";
 import { SF2eModel } from "./sf2e.js";
 import { SwadeModel } from "./swade.js";
 import { UseItemDialog } from "./use-item-dialog.js";
+import { tokenFootprintDistanceFeet } from "./geometry.js";
 import {
   captureChatMessage,
   configureChatFeed,
@@ -3695,26 +3696,14 @@ function targetRangeLabel(targetToken, item) {
 
 function tokenDistanceFeet(a, b) {
   const scene = state.scene ?? buildLocalSceneState();
-  const gridSize = Number(scene?.gridSize ?? 100) || 100;
-  const gridDistance = Number(scene?.gridDistance ?? 5) || 5;
-  const ax = Number(a.x ?? 0) + (Number(a.width ?? 1) * gridSize / 2);
-  const ay = Number(a.y ?? 0) + (Number(a.height ?? 1) * gridSize / 2);
-  const bx = Number(b.x ?? 0) + (Number(b.width ?? 1) * gridSize / 2);
-  const by = Number(b.y ?? 0) + (Number(b.height ?? 1) * gridSize / 2);
-  return (Math.hypot(ax - bx, ay - by) / gridSize) * gridDistance;
+  return tokenFootprintDistanceFeet(a, b, {
+    gridSize: Number(scene?.gridSize ?? 100) || 100,
+    gridDistance: Number(scene?.gridDistance ?? 5) || 5
+  });
 }
 
 function tokenEdgeDistanceFeet(a, b) {
-  const scene = state.scene ?? buildLocalSceneState();
-  const gridSize = Number(scene?.gridSize ?? 100) || 100;
-  const gridDistance = Number(scene?.gridDistance ?? 5) || 5;
-  const aRight = Number(a.x ?? 0) + (Number(a.width ?? 1) * gridSize);
-  const aBottom = Number(a.y ?? 0) + (Number(a.height ?? 1) * gridSize);
-  const bRight = Number(b.x ?? 0) + (Number(b.width ?? 1) * gridSize);
-  const bBottom = Number(b.y ?? 0) + (Number(b.height ?? 1) * gridSize);
-  const gapX = Math.max(0, Number(b.x ?? 0) - aRight, Number(a.x ?? 0) - bRight);
-  const gapY = Math.max(0, Number(b.y ?? 0) - aBottom, Number(a.y ?? 0) - bBottom);
-  return ((Math.hypot(gapX, gapY) / gridSize) * gridDistance) + gridDistance;
+  return tokenDistanceFeet(a, b);
 }
 
 function tokenIsIncapacitated(token = {}) {
@@ -3828,14 +3817,14 @@ function openRollChoiceDialog(data = {}) {
 
 export function renderRollInstructions(instructions = [], allowManual = true, actionAttribute = "data-modal-action") {
   if (!instructions.length) return "";
-  const autoTurnBlocked = dnd5eAutoTurnBlocked();
+  const autoOutOfTurn = dnd5eAutoOutOfTurn();
   const hasAutoInstructions = allowManual && instructions.some((entry) => !entry.nativeAction && entry.formula);
   return `
     <div class="pp-roll-instructions">
       ${game.system.id === "dnd5e" && hasAutoInstructions ? `
-        <div class="pp-auto-turn-notice ${autoTurnBlocked ? "" : "hidden"}" data-auto-turn-notice role="status">
-          <i class="fas fa-hourglass-half"></i>
-          <span><strong>AUTO is waiting for your turn</strong>D&amp;D AUTO rolls unlock when this actor becomes the active combatant.</span>
+        <div class="pp-auto-turn-notice ${autoOutOfTurn ? "" : "hidden"}" data-auto-turn-notice role="status">
+          <i class="fas fa-clock-rotate-left"></i>
+          <span><strong>Out-of-turn AUTO</strong>This roll is happening outside the actor's turn, such as a reaction or triggered feature. Confirm the trigger, then use AUTO normally.</span>
         </div>
       ` : ""}
       ${instructions.map((entry) => `
@@ -3858,7 +3847,7 @@ export function renderRollInstructions(instructions = [], allowManual = true, ac
             </div>
           ` : (allowManual && entry.formula ? `
             <div class="pp-roll-instruction-actions pp-auto-roll-actions">
-              <button class="pp-button primary pp-auto-roll-button" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}" data-workflow-action="${entry.workflowAction === false ? "false" : "true"}" ${autoTurnBlocked ? 'disabled aria-disabled="true" title="AUTO unlocks when it is this actor’s turn."' : ""}>AUTO</button>
+              <button class="pp-button primary pp-auto-roll-button" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}" data-workflow-action="${entry.workflowAction === false ? "false" : "true"}">AUTO</button>
               <output class="pp-auto-roll-result" data-auto-roll-result aria-live="polite"></output>
             </div>
           ` : "")}
@@ -3990,11 +3979,6 @@ async function autoRollInstruction(item, data = {}, control = {}) {
   const actor = currentActor();
   const formula = String(data.formula ?? "").trim();
   if (!actor || !formula) return;
-  if (dnd5eAutoTurnBlocked(actor)) {
-    ui.notifications?.warn?.("D&D AUTO rolls unlock when it is this actor's turn.");
-    syncDnd5eAutoTurnControls();
-    return;
-  }
   warnOutOfTurn(actor, "roll");
   const kind = String(data.rollKind ?? "").toLowerCase();
   const requestId = foundry.utils.randomID();
@@ -4112,28 +4096,29 @@ export function actorHasActiveTurn(actor) {
   return getActorTokenCandidates(actor.id).some((token) => token.id === activeTokenId);
 }
 
-function dnd5eAutoTurnBlocked(actor = currentActor()) {
+function dnd5eAutoOutOfTurn(actor = currentActor()) {
   return game.system.id === "dnd5e" && !!actor && !actorHasActiveTurn(actor);
 }
 
 function syncDnd5eAutoTurnControls(root = document) {
-  const blocked = dnd5eAutoTurnBlocked();
+  const outOfTurn = dnd5eAutoOutOfTurn();
   for (const button of root.querySelectorAll?.(".pp-auto-roll-button") ?? []) {
     const rolling = !!String(button.dataset.autoRequestId ?? "")
       && pendingAutoRollControls.has(String(button.dataset.autoRequestId));
-    button.disabled = blocked || rolling;
-    button.setAttribute("aria-disabled", String(blocked || rolling));
-    button.title = blocked ? "AUTO unlocks when it is this actor's turn." : "";
+    button.disabled = rolling;
+    button.setAttribute("aria-disabled", String(rolling));
+    button.title = "";
   }
   for (const notice of root.querySelectorAll?.("[data-auto-turn-notice], [data-out-of-turn-warning]") ?? []) {
-    notice.classList.toggle("hidden", !blocked);
+    notice.classList.toggle("hidden", !outOfTurn);
   }
 }
 
 function outOfTurnWarning(actor = currentActor()) {
-  return actor && !actorHasActiveTurn(actor)
-    ? "It is not your turn. You may prepare targets, move, or use an action, but D&D AUTO rolls unlock on your turn."
-    : "";
+  if (!actor || actorHasActiveTurn(actor)) return "";
+  return game.system.id === "dnd5e"
+    ? "It is not your turn. If this is a reaction or another triggered feature, confirm its trigger and continue; AUTO remains available."
+    : "It is not your turn. Confirm that this action can be used outside your turn before continuing.";
 }
 
 function warnOutOfTurn(actor = currentActor(), action = "action") {
@@ -5989,6 +5974,7 @@ function openPilotReactionPrompt(data = {}) {
       </div>
       <strong data-reaction-countdown>${initialRemaining}s</strong>
     </div>
+    ${renderReactionResourceContext(choices)}
     <div class="pp-reaction-choices">
       ${choices.map((choice) => `
         <button class="pp-reaction-choice" type="button" data-modal-action="chooseReaction" data-choice-id="${escapeHtml(choice.id)}">
@@ -6159,6 +6145,58 @@ function reactionChoiceLabel(activity) {
   return `${itemName}: ${activityName}`;
 }
 
+function reactionResourceDetails(subject) {
+  const details = game.playerPilot?.model?.reactionResourceDetails?.(subject);
+  return Array.isArray(details)
+    ? details.map((entry) => ({
+      kind: cleanRulesText(entry?.kind ?? "uses").toLowerCase(),
+      label: cleanRulesText(entry?.label ?? "Uses"),
+      value: cleanRulesText(entry?.value ?? ""),
+      reset: cleanRulesText(entry?.reset ?? "")
+    })).filter((entry) => entry.label && entry.value)
+    : [];
+}
+
+function reactionResourceIcon(kind) {
+  return ({
+    activity: "fa-bolt",
+    attribute: "fa-gauge-high",
+    cantrip: "fa-wand-magic-sparkles",
+    item: "fa-battery-three-quarters",
+    material: "fa-box",
+    reaction: "fa-clock-rotate-left",
+    slot: "fa-layer-group",
+    spell: "fa-wand-sparkles"
+  })[String(kind ?? "")] ?? "fa-battery-three-quarters";
+}
+
+function renderReactionResourceContext(choices = [], { compact = false } = {}) {
+  const withResources = choices
+    .map((choice) => ({ choice, details: Array.isArray(choice?.resourceDetails) ? choice.resourceDetails : [] }))
+    .filter((entry) => entry.details.length);
+  if (!withResources.length) return "";
+  const showChoiceName = withResources.length > 1;
+  return `
+    <section class="pp-reaction-resource-context ${compact ? "compact" : ""}">
+      ${compact ? "" : `<header><i class="fas fa-circle-info"></i><strong>Current uses from D&amp;D</strong></header>`}
+      ${withResources.map(({ choice, details }) => `
+        <div class="pp-reaction-resource-group">
+          ${showChoiceName ? `<b>${escapeHtml(choice.label ?? "Reaction")}</b>` : ""}
+          ${details.map((entry) => `
+            <span class="pp-reaction-resource">
+              <i class="fas ${escapeHtml(reactionResourceIcon(entry.kind))}"></i>
+              <span>
+                <strong>${escapeHtml(entry.label ?? "Uses")}</strong>
+                <small>${escapeHtml(entry.value ?? "")}${entry.reset ? ` <em>• ${escapeHtml(entry.reset)}</em>` : ""}</small>
+              </span>
+            </span>
+          `).join("")}
+        </div>
+      `).join("")}
+    </section>
+  `;
+}
+
 function reactionSecondsRemaining(expiresAt) {
   return Math.max(0, Math.ceil((Number(expiresAt ?? 0) - Date.now()) / 1000));
 }
@@ -6198,7 +6236,10 @@ function renderGmReactionChatCard(details = {}) {
         ${choices.map((choice) => `
           <span>
             <img src="${escapeHtml(choice.img ?? "icons/svg/item-bag.svg")}" alt="">
-            <strong>${escapeHtml(choice.label ?? "Reaction")}</strong>
+            <span>
+              <strong>${escapeHtml(choice.label ?? "Reaction")}</strong>
+              ${renderReactionResourceContext([choice], { compact: true })}
+            </span>
           </span>
         `).join("")}
       </div>
@@ -6265,7 +6306,8 @@ function requestPilotReaction(user, actor, reactions, options = {}) {
     choices: reactions.map((activity) => ({
       id: String(activity.uuid ?? ""),
       label: reactionChoiceLabel(activity),
-      img: String(activity.item?.img ?? activity.img ?? "icons/svg/item-bag.svg")
+      img: String(activity.item?.img ?? activity.img ?? "icons/svg/item-bag.svg"),
+      resourceDetails: reactionResourceDetails(activity)
     }))
   };
   const chatMessagePromise = createGmReactionChatMessage(actor, chatDetails).catch((error) => {
@@ -7362,11 +7404,47 @@ function surfacePilotPrompt(app, html = null) {
   root.classList.add("pp-native-prompt");
   root.setAttribute("aria-modal", "true");
   root.dataset.ppNativePrompt = "1";
+  decorateDnd5eNativePromptResources(app, root);
   syncPilotPromptBackdrop();
   window.requestAnimationFrame(() => {
     if (!root.isConnected) return;
     root.querySelector("button[autofocus], footer button, [data-application-part='footer'] button")?.focus?.({ preventScroll: true });
   });
+}
+
+function decorateDnd5eNativePromptResources(app, root) {
+  if (game.system.id !== "dnd5e" || root.dataset.ppResourceContext === "1") return;
+  const actor = currentActor();
+  if (!actor) return;
+  const promptText = cleanRulesText([
+    app?.title,
+    app?.window?.title,
+    root.querySelector(".window-title")?.textContent,
+    root.textContent
+  ].filter(Boolean).join(" ")).toLowerCase();
+  const item = asArray(actor.items)
+    .filter((candidate) => cleanRulesText(candidate?.name).length >= 3)
+    .sort((left, right) => cleanRulesText(right?.name).length - cleanRulesText(left?.name).length)
+    .find((candidate) => promptText.includes(cleanRulesText(candidate.name).toLowerCase()));
+  if (!item) return;
+  const resourceDetails = reactionResourceDetails(item);
+  if (!resourceDetails.length) return;
+  const content = root.querySelector(".dialog-content, [data-application-part='form'].dialog-content")
+    ?? root.querySelector(".cpr-dialog")
+    ?? root.querySelector("form")
+    ?? root.querySelector("[data-application-part='content']");
+  if (!(content instanceof HTMLElement)) return;
+  const template = document.createElement("template");
+  template.innerHTML = renderReactionResourceContext([{
+    label: itemDisplayName(item),
+    resourceDetails
+  }]);
+  const panel = template.content.firstElementChild;
+  if (!panel) return;
+  const firstField = content.querySelector("input, select, textarea, .form-group, fieldset");
+  if (firstField?.parentElement === content) content.insertBefore(panel, firstField);
+  else content.append(panel);
+  root.dataset.ppResourceContext = "1";
 }
 
 function installPilotPromptObserver() {

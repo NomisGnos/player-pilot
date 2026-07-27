@@ -1,4 +1,5 @@
 import { BaseModel } from "./base-model.js";
+import { dnd5eResourceDetails } from "./dnd5e-resources.js";
 import {
   actorHasActiveTurn,
   addLog,
@@ -515,6 +516,13 @@ export class DnD5eModel extends BaseModel {
       return `${base}${recovery ? `, resets on ${recovery}` : ""}`;
     }
     return "";
+  }
+
+  reactionResourceDetails(subject) {
+    return dnd5eResourceDetails(subject, {
+      actor: subject?.actor ?? subject?.item?.actor ?? this.actor,
+      item: subject?.item ?? (subject?.system ? subject : null)
+    });
   }
 
   itemHasActionTiming(item) {
