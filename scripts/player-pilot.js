@@ -3817,16 +3817,8 @@ function openRollChoiceDialog(data = {}) {
 
 export function renderRollInstructions(instructions = [], allowManual = true, actionAttribute = "data-modal-action") {
   if (!instructions.length) return "";
-  const autoOutOfTurn = dnd5eAutoOutOfTurn();
-  const hasAutoInstructions = allowManual && instructions.some((entry) => !entry.nativeAction && entry.formula);
   return `
     <div class="pp-roll-instructions">
-      ${game.system.id === "dnd5e" && hasAutoInstructions ? `
-        <div class="pp-auto-turn-notice ${autoOutOfTurn ? "" : "hidden"}" data-auto-turn-notice role="status">
-          <i class="fas fa-clock-rotate-left"></i>
-          <span><strong>Out-of-turn AUTO</strong>This roll is happening outside the actor's turn, such as a reaction or triggered feature. Confirm the trigger, then use AUTO normally.</span>
-        </div>
-      ` : ""}
       ${instructions.map((entry) => `
         <article class="pp-roll-instruction pp-roll-choice-hero pp-roll-kind-${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}">
           <img class="pp-instruction-icon" src="${escapeHtml(rollInstructionIcon(entry))}" alt="">
@@ -4109,7 +4101,7 @@ function syncDnd5eAutoTurnControls(root = document) {
     button.setAttribute("aria-disabled", String(rolling));
     button.title = "";
   }
-  for (const notice of root.querySelectorAll?.("[data-auto-turn-notice], [data-out-of-turn-warning]") ?? []) {
+  for (const notice of root.querySelectorAll?.("[data-out-of-turn-warning]") ?? []) {
     notice.classList.toggle("hidden", !outOfTurn);
   }
 }
@@ -6166,7 +6158,8 @@ function reactionResourceIcon(kind) {
     material: "fa-box",
     reaction: "fa-clock-rotate-left",
     slot: "fa-layer-group",
-    spell: "fa-wand-sparkles"
+    spell: "fa-wand-sparkles",
+    unlimited: "fa-infinity"
   })[String(kind ?? "")] ?? "fa-battery-three-quarters";
 }
 

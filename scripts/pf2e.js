@@ -242,7 +242,7 @@ export class PF2eModel extends BaseModel {
       this.groups.checks.push({
         kind: "skill",
         key,
-        name: skill?.label ?? key.toUpperCase(),
+        name: localizedFieldLabel(skill?.label, key),
         badge: "Skill",
         category: "skills",
         formula: d20Formula(skill?.mod ?? skill?.total ?? 0),
@@ -254,7 +254,7 @@ export class PF2eModel extends BaseModel {
       this.groups.checks.push({
         kind: "save",
         key,
-        name: save?.label ?? key.toUpperCase(),
+        name: localizedFieldLabel(save?.label, key),
         badge: "Save",
         category: "saves",
         formula: d20Formula(save?.mod ?? save?.total ?? 0),

@@ -8,6 +8,7 @@ function valuesOf(collection) {
 }
 
 function numeric(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return NaN;
   const number = Number(value);
   return Number.isFinite(number) ? number : NaN;
 }
@@ -65,15 +66,14 @@ function recoveryText(uses = {}) {
 
 function usePoolEntry(label, uses = {}, kind = "uses") {
   const max = numeric(uses.max);
+  // D&D5e derives value as 0 when max is empty; max is the system's authoritative limited-use flag.
+  if (!Number.isFinite(max) || max <= 0) return null;
   const explicitValue = numeric(uses.value);
   const spent = numeric(uses.spent);
   const available = Number.isFinite(explicitValue)
     ? explicitValue
     : (Number.isFinite(max) && Number.isFinite(spent) ? Math.max(0, max - spent) : NaN);
-  if ((!Number.isFinite(max) || max <= 0) && !Number.isFinite(available)) return null;
-  const value = Number.isFinite(max) && max > 0
-    ? `${Number.isFinite(available) ? available : max} / ${max} available`
-    : `${available} available`;
+  const value = `${Number.isFinite(available) ? available : max} / ${max} available`;
   return {
     kind,
     label: String(label ?? "Uses"),
@@ -189,6 +189,13 @@ export function dnd5eResourceDetails(subject, { actor = null, item = null } = {}
   }
   if (!consumedTypes.has("itemuses")) add(usePoolEntry(item?.name ?? "Item uses", item?.system?.uses, "item"));
 
+  const activation = String(
+    data?.activation?.type
+    ?? activity?.activation?.type
+    ?? item?.system?.activation?.type
+    ?? item?.system?.actionType
+    ?? ""
+  ).toLowerCase();
   const itemType = String(item?.type ?? "").toLowerCase();
   const spellLevel = numeric(item?.system?.level ?? item?.system?.rank);
   const preparationMode = String(
@@ -218,14 +225,10 @@ export function dnd5eResourceDetails(subject, { actor = null, item = null } = {}
     }
   }
 
-  const activation = String(
-    data?.activation?.type
-    ?? activity?.activation?.type
-    ?? item?.system?.activation?.type
-    ?? item?.system?.actionType
-    ?? ""
-  ).toLowerCase();
   if (activation === "reaction") {
+    if (!hasLimitedPool) {
+      add({ kind: "unlimited", label: "Availability", value: "∞ available", reset: "No limited-use resource" });
+    }
     add({ kind: "reaction", label: "Timing", value: "Reaction", reset: "This is an out-of-turn action" });
   }
 

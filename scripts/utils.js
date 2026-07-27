@@ -36,9 +36,9 @@ export function localizedFieldLabel(value, fallback = "") {
   const raw = fieldText(value, fallback);
   if (!raw) return "";
   const translated = localize(raw);
-  if (translated && translated !== raw) return translated;
+  if (translated && translated !== raw) return cleanRulesText(translated);
   if (/^[A-Z0-9_.-]+$/i.test(raw) && raw.includes(".")) return capitalizeWords(fallback || raw.split(".").pop());
-  return capitalizeWords(raw);
+  return capitalizeWords(cleanRulesText(raw));
 }
 
 export function formatUnitValue(value, units = "") {
@@ -204,6 +204,7 @@ export function cleanFoundrySyntax(value) {
 
 export function cleanRulesText(value) {
   return cleanFoundrySyntax(value)
+    .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

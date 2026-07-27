@@ -110,6 +110,52 @@ test("reads activity-local uses", () => {
   }]);
 });
 
+test("treats a reaction without a configured use pool as unlimited", () => {
+  const item = {
+    name: "Uncanny Dodge",
+    type: "feat",
+    system: {
+      uses: {
+        max: "",
+        spent: 0,
+        value: 0,
+        recovery: []
+      }
+    }
+  };
+  const activity = {
+    name: "Midi Use",
+    item,
+    system: {
+      activation: { type: "reaction" },
+      consumption: {
+        targets: [{ type: "activityUses", value: "1" }]
+      },
+      uses: {
+        max: null,
+        spent: 0,
+        value: 0,
+        recovery: []
+      }
+    }
+  };
+
+  assert.deepEqual(dnd5eResourceDetails(activity), [
+    {
+      kind: "unlimited",
+      label: "Availability",
+      value: "∞ available",
+      reset: "No limited-use resource"
+    },
+    {
+      kind: "reaction",
+      label: "Timing",
+      value: "Reaction",
+      reset: "This is an out-of-turn action"
+    }
+  ]);
+});
+
 test("supports legacy D&D item consumption used by v13-compatible system data", () => {
   const resource = {
     id: "superiority",

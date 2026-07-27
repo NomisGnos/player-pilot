@@ -82,6 +82,12 @@ export class DnD5eModel extends BaseModel {
     },
     { key: "rolls" },
     { key: "spells" },
+    {
+      key: "features",
+      label: "Features",
+      icon: "fa-star",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/features-view.hbs",
+    },
     { key: "inventory" },
     { key: "chat" },
     { key: "settings" },
