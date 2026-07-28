@@ -1509,7 +1509,7 @@ function registerSettings() {
     type: Boolean,
     default: true,
     onChange: (enabled) => {
-      state.shell.enableWakeLock(enabled);
+      state?.shell?.enableWakeLock(enabled);
     }
   });
 }
