@@ -7,6 +7,7 @@ import {
   renderInterfaceIcon,
   rollCheck,
   selectedQuickFilters,
+  setSetting,
   setting,
   showResultToast,
   state,
@@ -91,6 +92,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     this._onChatInput = this.handleChatInput.bind(this);
     this._onChatRecipientChange = this.handleChatRecipientChange.bind(this);
     this._onDicePlayerColorChange = this.handleDicePlayerColorChange.bind(this);
+    this._onUseWakeLockChange = this.handleUseWakeLockChange.bind(this);
     this._scrollListenerElement = null;
 
     this.wakeLock = new ScreenWakeLock();
@@ -144,6 +146,8 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const activeFilter = model.quickFilterFor(state.activeTab);
     const selectedFilters = new Set(model.selectedQuickFilters(state.activeTab));
 
+    const useWakeLock = setting("useWakeLock", true);
+
     return {
       availableTabs,
       tabs: this.prepareTabs(availableTabs),
@@ -160,6 +164,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       initiativeRollText,
       d20Icon: renderDieGlyph(20),
       statCards: model.summary.statCards,
+      useWakeLock,
       ...chatViewContext(),
       ...diceViewContext(),
     };
@@ -185,6 +190,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     chatForm?.querySelector("select[name='recipient']")?.addEventListener("change", this._onChatRecipientChange);
     const diceForm = this.element.querySelector(".pp-dice-settings-page");
     diceForm?.querySelector("[name='usePlayerColor']")?.addEventListener("change", this._onDicePlayerColorChange);
+    this.element.querySelector("[name='useWakeLock']")?.addEventListener("change", this._onUseWakeLockChange);
     this.syncDiceColorLock(diceForm);
     if (state.activeTab === "chat" && state.chatScrollToBottom) {
       state.chatScrollToBottom = false;
@@ -223,6 +229,10 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
   handleDicePlayerColorChange(event) {
     this.syncDiceColorLock(event.currentTarget.closest("form"));
+  }
+
+  handleUseWakeLockChange(event) {
+    setSetting("useWakeLock", event.currentTarget.checked);
   }
 
   syncDiceColorLock(form) {

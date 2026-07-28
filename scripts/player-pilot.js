@@ -556,6 +556,10 @@ export function setting(key, fallback = null) {
   }
 }
 
+export async function setSetting(key, value) {
+  await game.settings.set(MODULE_ID, key, value);
+}
+
 function normalizedDisplayRotation(value) {
   const rotation = Math.round(Number(value ?? 0) / 90) * 90;
   return ((rotation % 360) + 360) % 360;
