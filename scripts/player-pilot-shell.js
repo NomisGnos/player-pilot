@@ -92,6 +92,8 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     this._onChatRecipientChange = this.handleChatRecipientChange.bind(this);
     this._onDicePlayerColorChange = this.handleDicePlayerColorChange.bind(this);
     this._scrollListenerElement = null;
+
+    this.wakeLock = new ScreenWakeLock();
   }
 
   _configureRenderParts(options) {
@@ -196,6 +198,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
   _onClose(options) {
     this._scrollListenerElement?.removeEventListener("scroll", this._onShellScroll, true);
     this._scrollListenerElement = null;
+    this.wakeLock.destroy();
     return super._onClose(options);
   }
 
@@ -263,5 +266,59 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const body = this.element.querySelector(".pp-body");
     const button = this.element.querySelector(".pp-scroll-top");
     button?.classList.toggle("visible", (body?.scrollTop ?? 0) > 280);
+  }
+
+  enableWakeLock(enabled) {
+    if (enabled) {
+      this.wakeLock.request();
+    } else {
+      this.wakeLock.release();
+    }
+  }
+}
+
+class ScreenWakeLock {
+  wakeLock = null;
+
+  constructor() {
+    this._onVisibilityChange = this._onVisibilityChange.bind(this);
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    this.request();
+  }
+
+  async request() {
+    if (!("wakeLock" in navigator)) {
+      console.warn("Screen Wake Lock API is not supported");
+      return;
+    }
+
+    if (!setting("useWakeLock", true)) {
+      return;
+    }
+
+    try {
+      this.wakeLock = await navigator.wakeLock.request("screen");
+      this.wakeLock.addEventListener("release", () => {
+        this.wakeLock = null;
+      });
+    } catch (err) {
+      console.warn("Failed to acquire screen wake lock:", err);
+    }
+  }
+
+  release() {
+    this.wakeLock?.release();
+    this.wakeLock = null;
+  }
+
+  _onVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      this.request();
+    }
+  }
+
+  destroy() {
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    this.release();
   }
 }

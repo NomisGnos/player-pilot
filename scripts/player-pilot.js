@@ -1496,6 +1496,18 @@ function registerSettings() {
     type: Boolean,
     default: false
   });
+
+  game.settings.register(MODULE_ID, "useWakeLock", {
+    name: localize("PlayerPilot.settings.combatLock.name"),
+    hint: localize("PlayerPilot.settings.combatLock.hint"),
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: (enabled) => {
+      state.shell.enableWakeLock(enabled);
+    }
+  });
 }
 
 async function loadTemplates() {
