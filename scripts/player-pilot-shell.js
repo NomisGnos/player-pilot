@@ -297,12 +297,12 @@ class ScreenWakeLock {
   }
 
   async request() {
-    if (!("wakeLock" in navigator)) {
-      console.warn("Screen Wake Lock API is not supported");
+    if (!setting("useWakeLock", true)) {
       return;
     }
 
-    if (!setting("useWakeLock", true)) {
+    if (!("wakeLock" in navigator)) {
+      console.warn("Screen Wake Lock API is not supported");
       return;
     }
 
