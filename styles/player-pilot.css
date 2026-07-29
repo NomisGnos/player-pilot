@@ -6947,3 +6947,56 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
 .pp-sf2e-stamina-fill {
   background: linear-gradient(90deg, #287eb7, #63c8ff);
 }
+
+/* ---- Better Rolls ---- */
+.pp-br2-modal-header {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pp-br2-icon-button {
+  width: var(--pp-tap);
+  height: var(--pp-tap);
+  border: 1px solid var(--pp-line);
+  border-radius: var(--pp-radius);
+  background: var(--pp-panel-2);
+  color: var(--pp-text);
+}
+
+.pp-br2-card-host {
+  overflow: auto;
+  max-height: min(70vh, 640px);
+  color: var(--pp-text);
+}
+
+.pp-br2-card-host .brsw-card,
+.pp-br2-card-host .brsw-card-header-row {
+  background: transparent;
+}
+
+.pp-br2-card-host a {
+  color: var(--pp-accent);
+}
+
+/* Most of the header tools are not useful in player pilot so we hide them */
+.pp-br2-card-host .brsw-repeat-card,
+.pp-br2-card-host .brsw-save-macro,
+.pp-br2-card-host .brsw-tooltip {
+  display: none !important;
+}
+
+/* The images don't add much and we don't want users to click them, so we just hide them instead */
+.pp-br2-card-host .brsw-actor-img,
+.pp-br2-card-host .brsw-header-img-wrapper,
+.pp-br2-card-host .brsw-tooltip {
+  display: none !important;
+}
+
+/* The manual modifiers popup (ManualModifiersPopup) renders as an AppV2 appended to the document body with z-index 99999
+   our modal sits far above that, so it's created but invisible. Bring it above the modal while the modal is open. */
+body.player-pilot-modal-open .brsw-manual-popup {
+  z-index: 2147482700 !important;
+}

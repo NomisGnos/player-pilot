@@ -838,6 +838,7 @@ function buildLocalSceneState(viewerUserId = game.user?.id) {
   const tokens = viewedTokenDocumentsForScene(scene)
     .map((td) => ({
       id: td.id,
+      uuid: td.uuid,
       name: td.name ?? td.actor?.name ?? "Token",
       img: tokenImg(td),
       actorId: td.actor?.id ?? td.actorId ?? "",
@@ -921,7 +922,7 @@ function pruneSelectedTargetsForScene(scene = state.scene) {
 export function clearUseTargets() {
   const sceneId = String(state.scene?.id ?? "");
   setSelectedTargetSet(sceneId, new Set());
-  applyTargetsForCurrentUser([], sceneId);
+  game.playerPilot.model.applyTargetsForCurrentUser([], sceneId);
   sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: [] });
 }
 
@@ -3027,6 +3028,13 @@ function openUseDialog(itemId, flowOptions = {}) {
     ui.notifications?.warn?.(message);
     return;
   }
+  if (model.id === "swade") {
+    // Swade handles the flow differently so the generic spell-slot/activity UseItemDialog
+    // below doesn't apply and would otherwise fight over the modal slot.
+    model.openSwadeItemFlow(actor, item, state.scene);
+    return;
+  }
+
   const activeConcentration = model.id === "dnd5e" && item.type === "spell" && model.itemRequiresConcentration(item)
     ? model.actorConcentrationEffects(actor)[0] ?? null
     : null;
@@ -3043,7 +3051,6 @@ function openUseDialog(itemId, flowOptions = {}) {
     activeConcentration,
     services: {
       actorId: () => state.actorId,
-      applyTargetsForCurrentUser,
       assessSneakAttackApplicability,
       autoRollInstruction,
       clearActiveModal: (app) => {
@@ -3324,7 +3331,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
         selected.add(tokenId);
       }
       setSelectedTargetSet(sceneId, selected);
-      applyTargetsForCurrentUser(Array.from(selected), sceneId);
+      game.playerPilot.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
       for (const targetButton of _modal.querySelectorAll("[data-modal-action='modalToggleTarget'][data-token-id]")) {
         const isSelected = selected.has(String(targetButton.dataset.tokenId ?? ""));
         targetButton.closest(".pp-token-row")?.classList?.toggle?.("selected", isSelected);
@@ -3661,7 +3668,7 @@ export function renderModalTargetPicker(item, actionAttribute = "data-modal-acti
 }
 
 function renderModalTargetRow(token, selected, item, actionAttribute = "data-modal-action") {
-  const isSelected = selected.has(token.id);
+  const isSelected = selected.has(token.id) || selected.has(token.uuid);
   const range = targetRangeLabel(token, item);
   const disabled = range?.out === true;
   return `
@@ -3674,7 +3681,7 @@ function renderModalTargetRow(token, selected, item, actionAttribute = "data-mod
           ${renderTargetStateBadges(token)}
         </div>
       </div>
-      <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" ${actionAttribute}="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
+      <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" ${actionAttribute}="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-token-uuid="${escapeHtml(token.uuid)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
     </article>
   `;
 }
@@ -4404,47 +4411,10 @@ function targetIdsForCurrentUser() {
   return asArray(game.user?.targets).map((token) => String(token.id ?? token.document?.id ?? "")).filter(Boolean);
 }
 
-export function applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
-  const ids = Array.from(new Set((targetIds ?? []).map(String).filter(Boolean)));
-  let applied = false;
-  try {
-    if (canvas?.ready && typeof game.user?.updateTokenTargets === "function") {
-      game.user.updateTokenTargets(ids);
-      applied = true;
-    }
-  } catch (_err) {
-    // best effort below
-  }
-  try {
-    if (canvas?.ready && canvas.tokens?.placeables) {
-      const selected = new Set(ids);
-      for (const token of canvas.tokens.placeables) {
-        token.setTarget?.(selected.has(token.id), {
-          releaseOthers: false
-        });
-      }
-      applied = true;
-    }
-  } catch (_err) {
-    // best effort
-  }
-  try {
-    const sid = String(sceneId || canvas?.scene?.id || game.scenes?.viewed?.id || "").trim();
-    game.user?.broadcastActivity?.({
-      targets: ids,
-      scene: sid || undefined,
-      sceneId: sid || undefined
-    });
-  } catch (_err) {
-    // best effort
-  }
-  return applied;
-}
-
 async function applyTargets() {
   const sceneId = state.scene?.id ?? "";
   const targetIds = Array.from(selectedTargetSet(sceneId));
-  const applied = applyTargetsForCurrentUser(targetIds, sceneId);
+  const applied = game.playerPilot.model.applyTargetsForCurrentUser(targetIds, sceneId);
   sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds });
   addLog(applied ? `Player targets ${targetIds.length}` : `Targets saved ${targetIds.length}`);
 }
@@ -5361,18 +5331,18 @@ async function applyProxyTargetsForUser(userId) {
   const proxy = gmProxyTargets.get(String(userId));
   if (!proxy || Date.now() - proxy.at > 2 * 60 * 60 * 1000) return;
   const ids = proxy.targetIds ?? [];
-  applyTargetsForCurrentUser(ids, proxy.sceneId);
+  game.playerPilot.model.applyTargetsForCurrentUser(ids, proxy.sceneId);
 }
 
 async function withProxyTargetsForUser(userId, fn) {
   const proxy = gmProxyTargets.get(String(userId));
   const shouldApply = proxy && Date.now() - proxy.at <= 2 * 60 * 60 * 1000;
   const previous = shouldApply ? targetIdsForCurrentUser() : [];
-  if (shouldApply) applyTargetsForCurrentUser(proxy.targetIds ?? [], proxy.sceneId);
+  if (shouldApply) game.playerPilot.model.applyTargetsForCurrentUser(proxy.targetIds ?? [], proxy.sceneId);
   try {
     return await fn();
   } finally {
-    if (shouldApply) applyTargetsForCurrentUser(previous, proxy.sceneId);
+    if (shouldApply) game.playerPilot.model.applyTargetsForCurrentUser(previous, proxy.sceneId);
   }
 }
 

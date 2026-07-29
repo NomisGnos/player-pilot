@@ -86,7 +86,7 @@ export class BaseModel {
     toggleEquipped: function (_event, button) {
       game.playerPilot.model.toggleEquipped(button.dataset.itemId);
     },
-  }
+  };
 
   setActor(actor) {
     if (this.actor === actor) return;
@@ -433,5 +433,42 @@ export class BaseModel {
     type="button" role="switch" aria-checked="${item.equipped ? "true" : "false"}"
     data-action="toggleEquipped" data-item-id="${escapeHtml(item.id)}" title="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"
     aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`;
+  }
+
+  applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
+    const ids = Array.from(new Set((targetIds ?? []).map(String).filter(Boolean))).map(id => foundry.utils.parseUuid(id).id);
+    let applied = false;
+    try {
+      if (canvas?.ready && typeof game.user?.updateTokenTargets === "function") {
+        game.user.updateTokenTargets(ids);
+        applied = true;
+      }
+    } catch (_err) {
+      // best effort below
+    }
+    try {
+      if (canvas?.ready && canvas.tokens?.placeables) {
+        const selected = new Set(ids);
+        for (const token of canvas.tokens.placeables) {
+          token.setTarget?.(selected.has(token.id), {
+            releaseOthers: false
+          });
+        }
+        applied = true;
+      }
+    } catch (_err) {
+      // best effort
+    }
+    try {
+      const sid = String(sceneId || canvas?.scene?.id || game.scenes?.viewed?.id || "").trim();
+      game.user?.broadcastActivity?.({
+        targets: ids,
+        scene: sid || undefined,
+        sceneId: sid || undefined
+      });
+    } catch (_err) {
+      // best effort
+    }
+    return applied;
   }
 }

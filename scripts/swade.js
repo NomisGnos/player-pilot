@@ -1,7 +1,26 @@
 import { BaseModel } from "./base-model.js";
-import { closeModal, executePlayerFirst, openModal, renderDieGlyph, renderInterfaceIcon } from "./player-pilot.js";
+import {
+  br2Available,
+  openBR2AttributeRoll,
+  openBR2ItemRoll,
+  openBR2SkillRoll
+} from "./better-rolls-swade.js";
+import {
+  closeModal,
+  executePlayerFirst,
+  openModal,
+  pilotPaused,
+  renderDieGlyph,
+  renderInterfaceIcon,
+  renderModalTargetPicker,
+  selectedTargetSet,
+  setSelectedTargetSet,
+  targetInstructionText,
+  warnPaused
+} from "./player-pilot.js";
 import {
   capitalizeWords,
+  escapeHtml,
   localize,
   mergeTabs,
   numberText,
@@ -81,9 +100,17 @@ export class SwadeModel extends BaseModel {
       if (!actor) return;
 
       if (button.dataset.kind === "skill") {
-        actor.rollSkill(button.dataset.traitId);
+        if (br2Available()) {
+          await openBR2SkillRoll(actor, button.dataset.traitId);
+        } else {
+          actor.rollSkill(button.dataset.traitId);
+        }
       } else if (button.dataset.kind === "attribute") {
-        actor.rollAttribute(button.dataset.traitId);
+        if (br2Available()) {
+          await openBR2AttributeRoll(actor, button.dataset.traitId);
+        } else {
+          actor.rollAttribute(button.dataset.traitId);
+        }
       }
     },
   };
@@ -523,8 +550,8 @@ export class SwadeModel extends BaseModel {
   }
 
   async useItem(actor, item, _options = {}) {
-    if (game.brsw) {
-      game.brsw.create_item_card(actor, item.id);
+    if (br2Available()) {
+      await openBR2ItemRoll(actor, item);
     } else {
       await item.show();
     }
@@ -651,5 +678,105 @@ export class SwadeModel extends BaseModel {
     const equipIcon = SwadeModel.SWADE_EQUIP_STATE_ICONS[item.equipStatus];
     return `<button class="pp-carry-button" type="button" data-action="toggleEquipped" data-item-id="${item.id}"
     title="Change how ${item.name} is carried"><i class="${equipIcon}"></i><span>${equipLabel}</span></button>`;
+  }
+
+  /**
+   * Swade items use a different flow than the other systems but they still need
+   * player pilot's own target selection step first when the item can target
+   */
+  openSwadeItemFlow(actor, item, scene) {
+    const targetInfo = this.itemTargetInfo(item);
+    if (!targetInfo.needsTarget && !targetInfo.canTarget) {
+      closeModal();
+      this.useItem(actor, item, {});
+      return;
+    }
+
+    //Swade rolls can't be processed on the GM (without them doing everything),
+    //so we apply targets directly rather than sending them via socket like the other systems
+    const sceneIdForReset = scene?.id ?? "";
+    setSelectedTargetSet(sceneIdForReset, new Set());
+    this.applyTargetsForCurrentUser([], sceneIdForReset);
+    const normalized = this.normalizeItem(item);
+    const rangeFeet = this.getItemRangeFeet?.(item);
+    const pickerItem = { ...normalized, targetInfo, rangeFeet };
+    const renderPicker = () => renderModalTargetPicker(pickerItem);
+
+    const finish = () => {
+      closeModal();
+      this.useItem(actor, item, {});
+    };
+
+    openModal(`
+      <h2>${escapeHtml(item.name)}</h2>
+      <p data-modal-target-summary>${escapeHtml(targetInstructionText(targetInfo))}</p>
+      <div data-modal-target-picker>${renderPicker()}</div>
+      <div class="pp-dialog-actions">
+        <button class="pp-button" type="button" data-modal-action="close">Cancel</button>
+        ${targetInfo.needsTarget ? "" : `<button class="pp-button" type="button" data-modal-action="skipTargets">Skip</button>`}
+        <button class="pp-button primary" type="button" data-modal-action="confirmTargets">Continue</button>
+      </div>
+    `, {
+      modalToggleTarget: async (modal, button) => {
+        if (pilotPaused()) {
+          warnPaused();
+          return;
+        }
+        if (button?.disabled || button?.dataset?.disabled === "true") return;
+        const tokenUuid = button?.dataset?.tokenUuid ?? "";
+        const sceneId = scene?.id ?? "";
+        const selected = selectedTargetSet(sceneId);
+        if (selected.has(tokenUuid)) {
+          selected.delete(tokenUuid);
+        } else {
+          const limit = Number(targetInfo.count ?? 0);
+          if (Number.isFinite(limit) && limit > 0 && selected.size >= limit) {
+            if (limit === 1) selected.clear();
+            else {
+              ui.notifications?.warn?.(`Select up to ${limit} targets.`);
+              return;
+            }
+          }
+          selected.add(tokenUuid);
+        }
+        setSelectedTargetSet(sceneId, selected);
+        this.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+        const picker = modal.querySelector("[data-modal-target-picker]");
+        if (picker) picker.innerHTML = renderPicker();
+      },
+      skipTargets: () => {
+        if (pilotPaused()) {
+          warnPaused();
+          return;
+        }
+        finish();
+      },
+      confirmTargets: () => {
+        if (pilotPaused()) {
+          warnPaused();
+          return;
+        }
+        const current = selectedTargetSet(scene?.id ?? "");
+        if (targetInfo.needsTarget && current.size <= 0) {
+          ui.notifications?.warn?.("Choose a target first.");
+          return;
+        }
+        const limit = Number(targetInfo.count ?? 0);
+        if (Number.isFinite(limit) && limit > 0 && current.size > limit) {
+          ui.notifications?.warn?.(`Select up to ${limit} targets.`);
+          return;
+        }
+        finish();
+      },
+    });
+  }
+
+  applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
+    let applied = super.applyTargetsForCurrentUser(targetIds, sceneId);
+    if (!applied && br2Available()) {
+      game.brsw.targetIds = targetIds;
+      applied = true;
+    }
+    return applied;
   }
 }

@@ -343,7 +343,7 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     this.services.setSelectedTargetSet(sceneId, selected);
-    this.services.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+    this.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
     for (const targetButton of this.root.querySelectorAll("[data-action='modalToggleTarget'][data-token-id]")) {
       const selectedNow = selected.has(String(targetButton.dataset.tokenId ?? ""));
       targetButton.closest(".pp-token-row")?.classList.toggle("selected", selectedNow);
