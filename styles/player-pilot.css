@@ -7001,7 +7001,8 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
 .pp-br2-card-host .brsw-resist-buttons {
   display: none !important;
 }
-/* The manual modifiers popup (ManualModifiersPopup) renders as an AppV2 appended to the document body with z-index 99999
+
+/* The manual modifiers popup renders as an AppV2 appended to the document body with z-index 99999
    our modal sits far above that, so it's created but invisible and the anchor position is often a poor fit inside the modal
    Bring it above the modal, match its width to the card and center it. */
 body.player-pilot-modal-open .brsw-manual-popup {
@@ -7156,4 +7157,60 @@ body.player-pilot-modal-open #pp-management-dialog.brsw-pp-dialog {
 
 body.player-pilot-modal-open #pp-management-dialog.brsw-pp-dialog .form-footer {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.player-pilot-modal-open #br-card-dialog {
+  color: var(--pp-text);
+  background: var(--pp-panel);
+  max-height: 95%;
+}
+
+body.player-pilot-modal-open #br-card-dialog .brsw-dialog-title {
+  color: var(--pp-text);
+}
+
+body.player-pilot-modal-open .brsw-dialog-close-btn {
+  width: var(--pp-tap);
+  height: var(--pp-tap);
+  border: 1px solid var(--pp-line);
+  border-radius: var(--pp-radius);
+  background: var(--pp-panel-2);
+  color: var(--pp-text);
+}
+
+body.player-pilot-modal-open .brsw-action-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: var(--pp-tap) !important;
+  min-width: var(--pp-tap) !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  font-size: 1rem !important;
+  line-height: normal !important;
+  font-weight: 700 !important;
+  border-radius: var(--pp-radius) !important;
+  border: 1px solid var(--pp-line) !important;
+  background: var(--pp-panel-2) !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-modal-open .brsw-action-button.brsw-action-button-selected {
+  background: var(--pp-accent) !important;
+  color: var(--pp-panel) !important;
+  border-color: var(--pp-accent) !important;
+}
+
+body.player-pilot-modal-open #br-card-dialog .brsw-dialog-footer {
+  display: flex;
+  flex-direction: column;
+}
+
+body.player-pilot-modal-open #br-card-dialog .brsw-dialog-footer .brsw-dialog-button {
+  background: #273743;
+  color: #f4f8fa;
+  border-color: #9ef1df;
+  min-height: 42px;
+  font-size: 1rem;
+  font-weight: 900;
 }
