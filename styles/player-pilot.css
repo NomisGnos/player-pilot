@@ -7138,6 +7138,12 @@ body.player-pilot-modal-open .brsw-pp-manual {
   content: url("/modules/betterrolls-swade2/assets/magic-swirl-player-pilot.svg");
 }
 
+body.player-pilot-modal-open .brsw-ammo-manual {
+  background: var(--pp-accent) !important;
+  border-color: var(--pp-accent) !important;
+  content: url("/modules/betterrolls-swade2/assets/cycle-player-pilot.svg");
+}
+
 body.player-pilot-modal-open .brsw-header-title {
   --header-font-size: 32px;
 }
