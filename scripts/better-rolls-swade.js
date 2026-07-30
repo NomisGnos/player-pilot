@@ -3,7 +3,7 @@
 import { closeModal, openModal } from "./player-pilot.js";
 
 export function br2Available() {
-  return !!(game.brsw && game.brsw.activateCardListeners && game.brsw.decorateCardHTML && game.brsw.dialog);
+  return !!game.modules.get("betterrolls-swade2")?.active;
 }
 
 let chatCardSync = null; // { messageId, host, updateFn, observer }
