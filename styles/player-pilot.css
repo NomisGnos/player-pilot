@@ -6957,8 +6957,10 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
   gap: 8px;
 }
 
-.pp-br2-icon-button {
+.pp-br2-icon-button,
+body.player-pilot-modal-open .brsw-pp-dialog .header-control {
   width: var(--pp-tap);
+  min-width: var(--pp-tap);
   height: var(--pp-tap);
   border: 1px solid var(--pp-line);
   border-radius: var(--pp-radius);
@@ -7140,6 +7142,10 @@ body.player-pilot-modal-open .brsw-header-title {
   --header-font-size: 32px;
 }
 
+body.player-pilot-modal-open .brsw-damage-rows {
+  --damage-target-font-size: 24px;
+}
+
 /* Blocking backdrop for BR2's PP management dialog */
 .pp-br2-dialog-backdrop {
   position: fixed;
@@ -7161,8 +7167,12 @@ body.player-pilot-modal-open #pp-management-dialog.brsw-pp-dialog .form-footer {
 
 body.player-pilot-modal-open #br-card-dialog {
   color: var(--pp-text);
-  background: var(--pp-panel);
+  background: var(--pp-panel) !important;
   max-height: 95%;
+}
+
+body.player-pilot-modal-open #br-card-dialog::before {
+    background: none !important;
 }
 
 body.player-pilot-modal-open #br-card-dialog .brsw-dialog-title {
@@ -7213,4 +7223,61 @@ body.player-pilot-modal-open #br-card-dialog .brsw-dialog-footer .brsw-dialog-bu
   min-height: 42px;
   font-size: 1rem;
   font-weight: 900;
+}
+
+.pp-br2-card-host .brsw-damage-roll-damage > span {
+  position: relative;
+  z-index: 0;
+}
+
+.pp-br2-card-host .brsw-damage-roll-damage,
+.pp-br2-card-host .brsw-damage-roll-result {
+  font-size: 24px;
+}
+
+/* Creates an outline around the text */
+.pp-br2-card-host .brsw-damage-roll-damage > span::after {
+  content: attr(data-text);
+  text-align: center;
+  align-content: center;
+  position: absolute;
+  inset: 0;
+  color: black;
+  z-index: -1;
+  -webkit-text-stroke: 3px black;
+}
+
+.pp-br2-card-host .brsw-dice-image {
+  position: relative;
+  -webkit-text-stroke: 2px black;
+}
+
+.pp-br2-card-host .brsw-dice-image::before {
+  content: attr(data-text);
+  text-align: center;
+  align-content: center;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  -webkit-text-stroke: 0;
+  color: var(--brsw-chat-message-color);
+}
+
+/* Copied dark mode colors from BR2 */
+body.player-pilot-modal-open {
+  --brsw-chat-message-color: var(--color-light-2);
+  --brsw-button-bg-color: var(--color-cool-5-50);
+  --brsw-button-color: var(--color-light-3);
+  --brsw-color-blue: rgb(47, 137, 255);
+  --brsw-card-note-warning-color: #ff393d;
+  --brsw-card-note-bg-color: var(--brsw-color-gray-700);
+}
+
+body.player-pilot-modal-open .brsw-damage-roll-damage > span::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-color: #40404a;
+    mask: url("/icons/svg/combat.svg") center / 2em 2em no-repeat;
+    z-index: -1;
 }
