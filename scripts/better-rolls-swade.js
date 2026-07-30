@@ -3,7 +3,8 @@
 import { closeModal, openModal } from "./player-pilot.js";
 
 export function br2Available() {
-  return !!game.modules.get("betterrolls-swade2")?.active;
+  //We check that game.brsw.activateCardListeners is valid to make sure that the user has the right version of BR2
+  return !!(game.modules.get("betterrolls-swade2")?.active && game.brsw.activateCardListeners);
 }
 
 let chatCardSync = null; // { messageId, host, updateFn, observer }
