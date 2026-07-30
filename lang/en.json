@@ -23,6 +23,8 @@
   "PlayerPilot.settings.suppressAudio.hint": "Mute local audio elements on enabled player clients so table audio stays controlled by the GM device.",
   "PlayerPilot.settings.combatLock.name": "Respect Combat Turns",
   "PlayerPilot.settings.combatLock.hint": "When enabled, players can use actions and move only when one of their owned tokens is the active combatant.",
+  "PlayerPilot.settings.useWakeLock.name": "Keep Screen Active",
+  "PlayerPilot.settings.useWakeLock.hint": "When enabled, the device will not sleep/lock if the Player Pilot is active.",
   "PlayerPilot.panel.players": "Players",
   "PlayerPilot.panel.enabled": "Pilot",
   "PlayerPilot.panel.save": "Save"

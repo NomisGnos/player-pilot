@@ -34,5 +34,13 @@
         <button class="pp-button primary" type="button" data-action="saveDiceSettings"><i class="fas fa-floppy-disk"></i> Save</button>
       </div>
     </form>
+
+    {{!-- Wake Lock Setting --}}
+    <header class="pp-dice-page-heading">
+      <i class="fas fa-mobile"></i>
+      <div>
+      <label class="pp-checkbox-row"><input type="checkbox" name="useWakeLock" {{#if useWakeLock}}checked{{/if}}> {{localize "PlayerPilot.settings.useWakeLock.name"}}</label>
+      </div>
+    </header>
   </section>
 </main>

@@ -69,7 +69,7 @@ export class BaseModel {
       key: "settings",
       label: "Settings",
       icon: "fa-gear",
-      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/dice-view.hbs",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/settings-view.hbs",
     },
     {
       key: "map",

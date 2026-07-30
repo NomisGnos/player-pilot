@@ -556,6 +556,10 @@ export function setting(key, fallback = null) {
   }
 }
 
+export async function setSetting(key, value) {
+  await game.settings.set(MODULE_ID, key, value);
+}
+
 function normalizedDisplayRotation(value) {
   const rotation = Math.round(Number(value ?? 0) / 90) * 90;
   return ((rotation % 360) + 360) % 360;
@@ -1496,6 +1500,18 @@ function registerSettings() {
     config: true,
     type: Boolean,
     default: false
+  });
+
+  game.settings.register(MODULE_ID, "useWakeLock", {
+    name: localize("PlayerPilot.settings.combatLock.name"),
+    hint: localize("PlayerPilot.settings.combatLock.hint"),
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: (enabled) => {
+      state?.shell?.enableWakeLock(enabled);
+    }
   });
 }
 
