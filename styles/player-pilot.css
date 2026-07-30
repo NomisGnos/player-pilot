@@ -6995,8 +6995,142 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
   display: none !important;
 }
 
+/* The templates, macro buttons, and resist buttons can't be properly supported so we hide them */
+.pp-br2-card-host .brsw-swade-templates,
+.pp-br2-card-host .brsw-macro-buttons,
+.pp-br2-card-host .brsw-resist-buttons {
+  display: none !important;
+}
 /* The manual modifiers popup (ManualModifiersPopup) renders as an AppV2 appended to the document body with z-index 99999
-   our modal sits far above that, so it's created but invisible. Bring it above the modal while the modal is open. */
+   our modal sits far above that, so it's created but invisible and the anchor position is often a poor fit inside the modal
+   Bring it above the modal, match its width to the card and center it. */
 body.player-pilot-modal-open .brsw-manual-popup {
   z-index: 2147482700 !important;
+  inset: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  max-width: calc(100vw - 32px) !important;
+  overflow: auto !important;
+  background: var(--pp-panel) !important;
+  border: 1px solid var(--pp-line) !important;
+  border-radius: 10px !important;
+  color: var(--pp-text) !important;
+  font-size: 1rem !important;
+  box-shadow: var(--pp-shadow) !important;
+}
+
+.pp-br2-card-host button {
+  min-height: var(--pp-tap) !important;
+  font: inherit !important;
+  font-weight: 700 !important;
+  border-radius: var(--pp-radius) !important;
+  background: var(--pp-panel-2) !important;
+  border: 1px solid var(--pp-line) !important;
+  color: #06231f !important;
+  background: var(--pp-accent) !important;
+  border-color: rgba(98, 199, 178, 0.45) !important;
+}
+
+body.player-pilot-modal-open .brsw-button-image {
+  height: 60%;
+  width: auto;
+  max-width: none;
+  max-height: none;
+}
+
+body.player-pilot-modal-open .brsw-manual-mods {
+  min-height: 36px !important;
+  min-width: 36px !important;
+  align-content: center;
+  border-radius: var(--pp-radius) !important;
+  background: var(--pp-panel-2) !important;
+  border: 1px solid var(--pp-line) !important;
+  color: #06231f !important;
+  background: var(--pp-accent) !important;
+  border-color: rgba(98, 199, 178, 0.45) !important;
+}
+
+body.player-pilot-modal-open .brsw-manual-popup .brsw-player-modifiers {
+  flex-direction: column;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+body.player-pilot-modal-open .brsw-manual-popup .brsw-player-modifiers > div {
+  display: flex;
+  gap: 3px;
+}
+
+body.player-pilot-modal-open .brsw-manual-popup .brsw-selectable {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: var(--pp-tap) !important;
+  min-width: var(--pp-tap) !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  font-size: 1rem !important;
+  line-height: normal !important;
+  font-weight: 700 !important;
+  border-radius: var(--pp-radius) !important;
+  border: 1px solid var(--pp-line) !important;
+  background: var(--pp-panel-2) !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-modal-open .brsw-manual-popup .brsw-selectable.brsw-selected {
+  background: var(--pp-accent) !important;
+  color: var(--pp-panel) !important;
+  border-color: var(--pp-accent) !important;
+}
+
+body.player-pilot-modal-open .pp-mod-selection {
+  display:flex;
+  flex-direction: column;
+}
+
+body.player-pilot-modal-open .pp-mod {
+  padding: 5px;
+  min-height: var(--pp-tap) !important;
+  min-width: var(--pp-tap) !important;
+  font-size: 1rem !important;
+  line-height: normal !important;
+  font-weight: 700 !important;
+  border-radius: var(--pp-radius) !important;
+  border: 1px solid var(--pp-line) !important;
+  background: var(--pp-panel-2) !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-modal-open .pp-mod.selected {
+  background: var(--pp-accent) !important;
+  color: var(--pp-panel) !important;
+  border-color: var(--pp-accent) !important;
+}
+
+body.player-pilot-modal-open .brsw-toggle-icon {
+  padding: 5px;
+  min-height: 36px !important;
+  min-width: 36px !important;
+  font-size: 1rem !important;
+  line-height: normal !important;
+  font-weight: 700 !important;
+  border-radius: var(--pp-radius) !important;
+  border: 1px solid var(--pp-line) !important;
+  background: var(--pp-panel-2) !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-modal-open .brsw-toggle-icon.brsw-toggle-active {
+  background: var(--pp-accent) !important;
+  color: var(--pp-panel) !important;
+  border-color: var(--pp-accent) !important;
+}
+
+body.player-pilot-modal-open .brsw-pp-manual {
+  background: var(--pp-accent) !important;
+  border-color: var(--pp-accent) !important;
+  content: url("/modules/betterrolls-swade2/assets/magic-swirl-player-pilot.svg");
 }

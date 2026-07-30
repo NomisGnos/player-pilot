@@ -2932,7 +2932,11 @@ export function openModal(content, handlers = {}) {
     const button = target?.closest?.("[data-modal-action]");
     const action = button?.dataset?.modalAction;
     if (!action) {
-      if (target === modal) closeModal();
+      if (target === modal) {
+        //If the mods popup is open, don't close the modal
+        if (game.brsw?.manualModsPopup) return;
+        closeModal();
+      }
       return;
     }
     event.preventDefault();
