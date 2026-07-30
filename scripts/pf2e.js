@@ -3,7 +3,6 @@ import {
   activeGmIds,
   actorHasActiveTurn,
   addLog,
-  applyTargetsForCurrentUser,
   closeModal,
   displayedTargetTokens,
   executePlayerFirst,
@@ -1328,7 +1327,7 @@ export class PF2eModel extends BaseModel {
           selected.add(tokenId);
         }
         setSelectedTargetSet(sceneId, selected);
-        applyTargetsForCurrentUser(Array.from(selected), sceneId);
+        this.applyTargetsForCurrentUser(Array.from(selected), sceneId);
         state.modal?.querySelectorAll?.(".pp-token-row").forEach((row) => {
           const rowButton = row.querySelector?.("[data-token-id]");
           const active = rowButton && selected.has(rowButton.dataset.tokenId);
