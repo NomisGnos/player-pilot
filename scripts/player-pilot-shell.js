@@ -7,6 +7,7 @@ import {
   renderInterfaceIcon,
   rollCheck,
   selectedQuickFilters,
+  setSetting,
   setting,
   showResultToast,
   state,
@@ -91,7 +92,10 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     this._onChatInput = this.handleChatInput.bind(this);
     this._onChatRecipientChange = this.handleChatRecipientChange.bind(this);
     this._onDicePlayerColorChange = this.handleDicePlayerColorChange.bind(this);
+    this._onUseWakeLockChange = this.handleUseWakeLockChange.bind(this);
     this._scrollListenerElement = null;
+
+    this.wakeLock = new ScreenWakeLock();
   }
 
   _configureRenderParts(options) {
@@ -142,6 +146,8 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const activeFilter = model.quickFilterFor(state.activeTab);
     const selectedFilters = new Set(model.selectedQuickFilters(state.activeTab));
 
+    const useWakeLock = setting("useWakeLock", true);
+
     return {
       availableTabs,
       tabs: this.prepareTabs(availableTabs),
@@ -158,6 +164,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
       initiativeRollText,
       d20Icon: renderDieGlyph(20),
       statCards: model.summary.statCards,
+      useWakeLock,
       ...chatViewContext(),
       ...diceViewContext(),
     };
@@ -183,6 +190,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     chatForm?.querySelector("select[name='recipient']")?.addEventListener("change", this._onChatRecipientChange);
     const diceForm = this.element.querySelector(".pp-dice-settings-page");
     diceForm?.querySelector("[name='usePlayerColor']")?.addEventListener("change", this._onDicePlayerColorChange);
+    this.element.querySelector("[name='useWakeLock']")?.addEventListener("change", this._onUseWakeLockChange);
     this.syncDiceColorLock(diceForm);
     if (state.activeTab === "chat" && state.chatScrollToBottom) {
       state.chatScrollToBottom = false;
@@ -196,6 +204,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
   _onClose(options) {
     this._scrollListenerElement?.removeEventListener("scroll", this._onShellScroll, true);
     this._scrollListenerElement = null;
+    this.wakeLock.destroy();
     return super._onClose(options);
   }
 
@@ -220,6 +229,10 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
   handleDicePlayerColorChange(event) {
     this.syncDiceColorLock(event.currentTarget.closest("form"));
+  }
+
+  handleUseWakeLockChange(event) {
+    setSetting("useWakeLock", event.currentTarget.checked);
   }
 
   syncDiceColorLock(form) {
@@ -263,5 +276,59 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
     const body = this.element.querySelector(".pp-body");
     const button = this.element.querySelector(".pp-scroll-top");
     button?.classList.toggle("visible", (body?.scrollTop ?? 0) > 280);
+  }
+
+  enableWakeLock(enabled) {
+    if (enabled) {
+      this.wakeLock.request();
+    } else {
+      this.wakeLock.release();
+    }
+  }
+}
+
+class ScreenWakeLock {
+  wakeLock = null;
+
+  constructor() {
+    this._onVisibilityChange = this._onVisibilityChange.bind(this);
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    this.request();
+  }
+
+  async request() {
+    if (!setting("useWakeLock", true)) {
+      return;
+    }
+
+    if (!("wakeLock" in navigator)) {
+      console.warn("Screen Wake Lock API is not supported");
+      return;
+    }
+
+    try {
+      this.wakeLock = await navigator.wakeLock.request("screen");
+      this.wakeLock.addEventListener("release", () => {
+        this.wakeLock = null;
+      });
+    } catch (err) {
+      console.warn("Failed to acquire screen wake lock:", err);
+    }
+  }
+
+  release() {
+    this.wakeLock?.release();
+    this.wakeLock = null;
+  }
+
+  _onVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      this.request();
+    }
+  }
+
+  destroy() {
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    this.release();
   }
 }
