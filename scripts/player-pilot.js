@@ -2918,7 +2918,7 @@ function findItem(itemId) {
   return actor?.items?.get?.(itemId) ?? null;
 }
 
-export function openModal(content, handlers = {}) {
+export function openModal(content, handlers = {}, options = { closeOnOutsideClick: true }) {
   closeModal();
   document.querySelector(".pp-result-toast")?.remove();
   const modal = document.createElement("section");
@@ -2932,9 +2932,7 @@ export function openModal(content, handlers = {}) {
     const button = target?.closest?.("[data-modal-action]");
     const action = button?.dataset?.modalAction;
     if (!action) {
-      if (target === modal) {
-        //If the mods popup is open, don't close the modal
-        if (game.brsw?.manualModsPopup) return;
+      if (target === modal && options.closeOnOutsideClick) {
         closeModal();
       }
       return;

@@ -7138,3 +7138,22 @@ body.player-pilot-modal-open .brsw-pp-manual {
 body.player-pilot-modal-open .brsw-header-title {
   --header-font-size: 32px;
 }
+
+/* Blocking backdrop for BR2's PP management dialog */
+.pp-br2-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482750;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+body.player-pilot-modal-open #pp-management-dialog.brsw-pp-dialog {
+  top: 1em !important;
+  bottom: 1em !important;
+  max-height: 100% !important;
+  transform: translate(-50%, 0%) !important;
+}
+
+body.player-pilot-modal-open #pp-management-dialog.brsw-pp-dialog .form-footer {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

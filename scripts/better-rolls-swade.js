@@ -79,7 +79,7 @@ export async function showBR2RollModal(brCard) {
       </div>
       <div class="pp-br2-card-host">${content}</div>
     </div>
-  `);
+  `, {}, { closeOnOutsideClick: false });
 
   const host = document.querySelector(".pp-br2-card-host");
   if (!host) return;
@@ -123,3 +123,22 @@ export function closeBR2RollModal() {
   stopChatCardSync();
   closeModal();
 }
+
+// When rendering the pp management dialog, we want to make it modal
+// To do this, we insert a backdrop to block interaction
+Hooks.on("renderApplicationV2", (app) => {
+  if (app?.constructor?.name !== "PPManagementDialog") return;
+  if (!document.body.classList.contains("player-pilot-modal-open")) return;
+  if (app._ppBackdrop && document.body.contains(app._ppBackdrop)) return;
+
+  const backdrop = document.createElement("div");
+  backdrop.classList.add("pp-br2-dialog-backdrop");
+  document.body.appendChild(backdrop);
+  app._ppBackdrop = backdrop;
+});
+
+Hooks.on("closeApplicationV2", (app) => {
+  if (app?.constructor?.name !== "PPManagementDialog") return;
+  app._ppBackdrop?.remove();
+  app._ppBackdrop = null;
+});
