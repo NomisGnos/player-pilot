@@ -71,6 +71,7 @@ export class PF2eModel extends BaseModel {
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },
+    { key: "effects" },
     { key: "chat" },
     { key: "settings" },
     { key: "map" },

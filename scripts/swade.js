@@ -55,6 +55,7 @@ export class SwadeModel extends BaseModel {
       sectionHeader: { title: "Powers", icon: renderInterfaceIcon("fa-wand-magic-sparkles") },
     },
     { key: "inventory" },
+    { key: "effects" },
     { key: "chat" },
     { key: "settings" },
     { key: "map" },

@@ -89,6 +89,7 @@ export class DnD5eModel extends BaseModel {
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/features-view.hbs",
     },
     { key: "inventory" },
+    { key: "effects" },
     { key: "chat" },
     { key: "settings" },
     { key: "map" },

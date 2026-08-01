@@ -1,0 +1,32 @@
+<main class="pp-body">
+  <section class="pp-view pp-stats-page pp-system-{{model.id}} tab {{#if (eq activeTab.key 'effects')}}active{{/if}}" data-tab="effects">
+    <div class="pp-section">
+      {{#each model.groups.effects as |group|}}
+        <div class="pp-subsection">
+          <div class="pp-section-header pp-big-header pp-combined-header">
+            <h2><span>{{group.name}}</span></h2>
+            <span class="pp-header-count">{{group.count}}</span>
+          </div>
+          <div class="pp-card-list">
+            {{#each group.effects as |effect|}}
+            {{log effect}}
+              <article class="pp-card pp-effect-card {{#if effect.disabled}}pp-effect-disabled{{/if}}">
+                <img src="{{effect.img}}">
+                <div class="pp-card-title">
+                  <span>{{effect.name}}</span>
+                </div>
+                <div class="effect-controls">
+                  <button class="pp-effect-btn" type="button" data-action="toggleEffect" data-effect-id="{{effect.id}}" data-parent-id="{{effect.parent.id}}">
+                    <i class="fas fa-power-off"></i>
+                  </button>
+                  <button class="pp-effect-btn" type="button" data-action="deleteEffect" data-effect-id="{{effect.id}}" data-parent-id="{{effect.parent.id}}">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </article>
+            {{/each}}
+          </div>
+        </div>
+      {{/each}}
+  </section>
+</main>

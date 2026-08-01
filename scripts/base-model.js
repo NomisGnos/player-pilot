@@ -60,6 +60,12 @@ export class BaseModel {
       viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/inventory-view.hbs",
     },
     {
+      key: "effects",
+      label: "Effects",
+      icon: "fa-person-rays",
+      viewTemplate: "modules/player-pilot/templates/player-pilot-shell/views/effects-view.hbs",
+    },
+    {
       key: "chat",
       label: "Chat",
       icon: "fa-comments",
@@ -85,6 +91,14 @@ export class BaseModel {
     },
     toggleEquipped: function (_event, button) {
       game.playerPilot.model.toggleEquipped(button.dataset.itemId);
+    },
+    toggleEffect: async function (_event, button) {
+      const effectData = game.playerPilot.model.getEffectData(button.dataset.effectId, button.dataset.parentId);
+      if (!effectData.effect) return;
+      await effectData.effect.update({ disabled: !effectData.effect.disabled });
+    },
+    deleteEffect: function (_event, button) {
+      game.playerPilot.model.openDeleteEffectDialog(button.dataset.effectId, button.dataset.parentId);
     },
   };
 
@@ -146,6 +160,7 @@ export class BaseModel {
 
   refreshGroupsImpl(items) {
     this.refreshInventoryGroups(items);
+    this.refreshEffectsGroups();
     this.groups.actions = items.filter(this.itemBelongsInActions).sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -175,6 +190,30 @@ export class BaseModel {
     }));
 
     this.groups.inventory = sortedGroups;
+  }
+
+  getEffectData(effectId, parentId) {
+    const effectData = { owner: this.actor, effect: null };
+    const actor = this.actor;
+    if (actor) {
+      effectData.owner = parentId && parentId !== actor.id ? actor.items.get(parentId) : actor;
+      effectData.effect = effectData.owner?.effects.get(effectId);
+    }
+    return effectData;
+  }
+
+  refreshEffectsGroups() {
+    const groups = new Map();
+    groups.set("temp", { name: "Temporary Effects", count: 0, effects: [] });
+    groups.set("perm", { name: "Permanent Effects", count: 0, effects: [] });
+    for (const effect of this.actor.allApplicableEffects()) {
+      const key = effect.isTemporary ? "temp" : "perm";
+      const group = groups.get(key);
+      group.effects.push(effect);
+      group.count = group.effects.length;
+    }
+
+    this.groups.effects = [...groups.values()];
   }
 
   normalizeItem(item, group = "items") {
@@ -470,5 +509,23 @@ export class BaseModel {
       // best effort
     }
     return applied;
+  }
+
+  openDeleteEffectDialog(effectId, parentId) {
+    const effectData = this.getEffectData(effectId, parentId)
+    if (!effectData.effect) return;
+    openModal(`
+      <h2>Delete Active Effect: ${effectData.effect.name}</h2>
+      <p>Are you sure? This Active Effect will be permanently deleted and cannot be recovered.</p>
+      <div class="pp-dialog-actions">
+        <button class="pp-button" type="button" data-modal-action="confirm">Confirm</button>
+        <button class="pp-button primary" type="button" data-modal-action="close">Cancel</button>
+      </div>
+    `, {
+      confirm: async () => {
+        closeModal();
+        await effectData.owner.deleteEmbeddedDocuments("ActiveEffect", [effectData.effect.id]);
+      }
+    });
   }
 }

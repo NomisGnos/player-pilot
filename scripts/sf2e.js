@@ -18,6 +18,7 @@ export class SF2eModel extends PF2eModel {
     { key: "rolls" },
     { key: "spells" },
     { key: "inventory" },
+    { key: "effects" },
     { key: "chat" },
     { key: "settings" },
     { key: "map" },

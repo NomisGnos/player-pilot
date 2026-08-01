@@ -6948,6 +6948,39 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
   background: linear-gradient(90deg, #287eb7, #63c8ff);
 }
 
+.pp-effect-card {
+  grid-template-columns: 42px minmax(0, 2fr) 1fr;
+  align-items: center;
+}
+
+.pp-effect-card img {
+  align-self: center;
+}
+
+.pp-effect-card .effect-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-self: center;
+  gap: 5px;
+}
+
+.pp-effect-card .effect-controls .pp-effect-btn {
+  width: var(--pp-tap);
+  height: var(--pp-tap);
+  color: white;
+  background: #354653;
+  border-color: rgba(157, 215, 255, 0.52) !important;
+}
+
+.pp-effect-card.pp-effect-disabled .pp-effect-btn[data-action="toggleEffect"] {
+  color: red;
+}
+
+.pp-effect-card.pp-effect-disabled .pp-card-title {
+  color: rgba(255, 255, 255, 0.4);
+  text-decoration: line-through;
+}
+
 /* ---- Better Rolls ---- */
 .pp-br2-modal-header {
   display: flex;
