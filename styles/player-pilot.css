@@ -7305,10 +7305,17 @@ body.player-pilot-modal-open .brsw-damage-roll-damage > span::before {
 }
 
 .pp-swade-modal-header {
+  position: sticky;
+  top: -14px;
+  margin: -14px -14px 0;
+  padding: 14px 14px 6px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  background: var(--pp-panel);
+  border-radius: 10px 10px 0 0;
 }
 
 .pp-swade-modal-title {
