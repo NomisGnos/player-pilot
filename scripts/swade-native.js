@@ -2,6 +2,20 @@
 
 import { closeModal, openModal, selectedTargetSet, state } from "./player-pilot.js";
 
+const activeHooks = new Set();
+
+function addHook(name, fn) {
+  const hookId = Hooks.on(name, fn);
+  activeHooks.add({ name, id: hookId });
+}
+
+function removeAllHooks() {
+  for (const hook of activeHooks) {
+    Hooks.off(hook.name, hook.id);
+  };
+  activeHooks.clear();
+}
+
 export async function openSwadeSkillRoll(actor, skillId) {
   const skill = actor.items.find(i => i.id === skillId);
   await runTraitRoll(skill.name, () => actor.rollSkill(skillId, {}));
@@ -21,7 +35,8 @@ export async function openSwadeItemCard(item) {
   const message = await item.show();
   if (!message) return;
 
-  unhookCreateListener();
+  removeAllHooks();
+
   const modalRoot = openSwadeRollShell(`
     <div class="pp-swade-item-card-host"></div>
     <div class="pp-swade-result-list"></div>
@@ -33,7 +48,8 @@ export async function openSwadeItemCard(item) {
 
   await renderItemCardInto(cardHost, modalRoot, message);
 
-  Hooks.on("createChatMessage", onCreateChatMessage);
+  addHook("createChatMessage", onCreateChatMessage);
+  addHook("swadeCalculateDefaultAttackMods", onCalculateDefaultAttackMods);
 }
 
 async function renderItemCardInto(host, modalRoot, message) {
@@ -71,7 +87,7 @@ function openSwadeRollShell(bodyHtml) {
   if (modalRoot) {
     const observer = new MutationObserver(() => {
       if (!document.body.contains(modalRoot)) {
-        unhookCreateListener();
+        removeAllHooks();
         observer.disconnect();
       }
     });
@@ -81,7 +97,7 @@ function openSwadeRollShell(bodyHtml) {
 }
 
 export function closeSwadeRollModal() {
-  unhookCreateListener();
+  removeAllHooks();
   closeModal();
 }
 
@@ -92,7 +108,7 @@ async function runTraitRoll(traitName, performRoll) {
   const message = game.messages?.get(roll.messageId);
   if (!message) return;
 
-  unhookCreateListener();
+  removeAllHooks();
 
   const modalRoot = openSwadeRollShell('<div class="pp-swade-result-list"></div>');
   const modalTitle = modalRoot.querySelector(".pp-swade-modal-title");
@@ -104,7 +120,7 @@ async function runTraitRoll(traitName, performRoll) {
   if (!resultList) return;
   await addRollResult(resultList, message);
 
-  Hooks.on("createChatMessage", onCreateChatMessage);
+  addHook("createChatMessage", onCreateChatMessage);
 }
 
 function onCreateChatMessage(message) {
@@ -112,10 +128,6 @@ function onCreateChatMessage(message) {
   if (!message.isRoll) return; // We only care about rolls
   const resultsList = document.querySelector(".pp-swade-result-list");
   if (resultsList) addRollResult(resultsList, message);
-}
-
-function unhookCreateListener() {
-  Hooks.off("createChatMessage", onCreateChatMessage);
 }
 
 async function addRollResult(resultsList, message) {
@@ -154,4 +166,27 @@ async function setTargetsFlag(message) {
 
   if (!targets.length) return;
   await message.setFlag("swade", "targets", targets);
+}
+
+
+function resolveOurTargetTokenDocument() {
+  const sceneId = state.scene?.id ?? "";
+  if (!sceneId) return undefined;
+  const ids = selectedTargetSet(sceneId);
+  const tokenId = ids.values().next().value; // matches game.user.targets.first()
+  if (!tokenId) return undefined;
+  return fromUuidSync(tokenId);
+}
+
+function onCalculateDefaultAttackMods(sourceToken, targetToken, _skill, item, isRangedAttack, isMeleeAttack, additionalMods, bestNonStackingMods) {
+  if (targetToken) return;
+  const ourTarget = resolveOurTargetTokenDocument();
+  if (!ourTarget) return;
+
+  const sceneId = state.scene?.id ?? "";
+  const ourSource = sourceToken ?? game.scenes?.get(sceneId)?.tokens?.find((t) => t.actorId === item?.actor?.id);
+
+  const computed = game.swade.util.getDefaultAttackModifiers(ourSource, ourTarget, item, isRangedAttack, isMeleeAttack);
+  additionalMods.push(...computed.additionalMods);
+  Object.assign(bestNonStackingMods, computed.bestNonStackingMods);
 }
