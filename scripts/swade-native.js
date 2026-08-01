@@ -1,12 +1,20 @@
 // Integration with SWADE's native roll flow
 
-import { closeModal, openModal, selectedTargetSet, state } from "./player-pilot.js";
+import { openModal, selectedTargetSet, state } from "./player-pilot.js";
 
 const activeHooks = new Set();
 
 function addHook(name, fn) {
   const hookId = Hooks.on(name, fn);
   activeHooks.add({ name, id: hookId });
+}
+
+function removeHook(name) {
+  const hook = activeHooks.find(h => h.name === name);
+  if (hook != null) {
+    Hooks.off(hook.name, hook.id);
+    activeHooks.delete(hook);
+  }
 }
 
 function removeAllHooks() {
@@ -49,6 +57,8 @@ export async function openSwadeItemCard(item) {
   await renderItemCardInto(cardHost, modalRoot, message);
 
   addHook("createChatMessage", onCreateChatMessage);
+  addHook("renderRollDialog", onRenderRollDialog);
+  addHook("closeRollDialog", onCloseRollDialog);
   addHook("swadeCalculateDefaultAttackMods", onCalculateDefaultAttackMods);
 }
 
@@ -79,36 +89,24 @@ function openSwadeRollShell(bodyHtml) {
       ${bodyHtml}
       </div>
     </div>
-  `, {}, { closeOnOutsideClick: false });
+  `, {}, { closeOnOutsideClick: false, onCloseModal });
 
-  // The modal's own close button/background-click paths call closeModal() directly,
-  // so watch for it leaving the DOM instead of relying on a callback.
-  const modalRoot = document.querySelector(".pp-swade-modal");
-  if (modalRoot) {
-    const observer = new MutationObserver(() => {
-      if (!document.body.contains(modalRoot)) {
-        removeAllHooks();
-        observer.disconnect();
-      }
-    });
-    observer.observe(document.body, { childList: true });
-  }
-  return modalRoot;
+  return document.querySelector(".pp-swade-modal");
 }
 
-export function closeSwadeRollModal() {
+export function onCloseModal() {
   removeAllHooks();
-  closeModal();
 }
 
 async function runTraitRoll(traitName, performRoll) {
+  addHook("renderRollDialog", onRenderRollDialog);
+  addHook("closeRollDialog", onCloseRollDialog);
+
   const roll = await performRoll();
-  if (!roll?.messageId) return; // dialog was cancelled
+  if (!roll?.messageId) return; // Dialog was cancelled
 
   const message = game.messages?.get(roll.messageId);
   if (!message) return;
-
-  removeAllHooks();
 
   const modalRoot = openSwadeRollShell('<div class="pp-swade-result-list"></div>');
   const modalTitle = modalRoot.querySelector(".pp-swade-modal-title");
@@ -130,6 +128,27 @@ function onCreateChatMessage(message) {
   if (resultsList) addRollResult(resultsList, message);
 }
 
+function onRenderRollDialog(app, html) {
+  const oldClose = app.close.bind(app);
+  app.close = (options) => oldClose({ ...options, animate: false });
+
+  // When rendering the dialog, we want to make it modal
+  // To do this, we insert a backdrop to block interaction
+  if (!app._ppBackdrop || !document.body.contains(app._ppBackdrop)) {
+    const backdrop = document.createElement("div");
+    backdrop.classList.add("pp-br2-dialog-backdrop");
+    document.body.appendChild(backdrop);
+    app._ppBackdrop = backdrop;
+  }
+}
+
+function onCloseRollDialog(app) {
+  app._ppBackdrop?.remove();
+  app._ppBackdrop = null;
+  removeHook("renderRollDialog");
+  removeHook("closeRollDialog");
+}
+
 async function addRollResult(resultsList, message) {
   await setTargetsFlag(message);
   const block = document.createElement("div");
@@ -142,7 +161,7 @@ async function addRollResult(resultsList, message) {
 
   //Scroll to the bottom so we can see the new result
   window.requestAnimationFrame(() => {
-    const modalContent = document.querySelector(".pp-swade-modal-content");
+    const modalContent = document.querySelector(".pp-dialog");
     if (modalContent) modalContent.scrollTop = modalContent.scrollHeight;
   });
 }
