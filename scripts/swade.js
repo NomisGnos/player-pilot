@@ -6,6 +6,11 @@ import {
   openBR2SkillRoll
 } from "./better-rolls-swade.js";
 import {
+  openSwadeAttributeRoll,
+  openSwadeItemCard,
+  openSwadeSkillRoll
+} from "./swade-native.js";
+import {
   closeModal,
   executePlayerFirst,
   openModal,
@@ -103,13 +108,13 @@ export class SwadeModel extends BaseModel {
         if (br2Available()) {
           await openBR2SkillRoll(actor, button.dataset.traitId);
         } else {
-          actor.rollSkill(button.dataset.traitId);
+          await openSwadeSkillRoll(actor, button.dataset.traitId);
         }
       } else if (button.dataset.kind === "attribute") {
         if (br2Available()) {
           await openBR2AttributeRoll(actor, button.dataset.traitId);
         } else {
-          actor.rollAttribute(button.dataset.traitId);
+          await openSwadeAttributeRoll(actor, button.dataset.traitId);
         }
       }
     },
@@ -553,7 +558,7 @@ export class SwadeModel extends BaseModel {
     if (br2Available()) {
       await openBR2ItemRoll(actor, item);
     } else {
-      await item.show();
+      await openSwadeItemCard(item);
     }
   }
 

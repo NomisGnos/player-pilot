@@ -6958,6 +6958,7 @@ body.player-pilot-active #dice-box-canvas { z-index: 2147482960 !important; }
 }
 
 .pp-br2-icon-button,
+.pp-icon-button,
 body.player-pilot-modal-open .brsw-pp-dialog .header-control {
   width: var(--pp-tap);
   min-width: var(--pp-tap);
@@ -7286,4 +7287,133 @@ body.player-pilot-modal-open .brsw-damage-roll-damage > span::before {
     background-color: #40404a;
     mask: url("/icons/svg/combat.svg") center / 2em 2em no-repeat;
     z-index: -1;
+}
+
+/* ---- Native SWADE rolls ---- */
+.pp-swade-modal {
+  display: grid;
+  gap: 10px;
+  color: var(--pp-text);
+}
+
+.pp-swade-modal h3 {
+  color: var(--pp-accent);
+}
+
+.pp-swade-modal h4 {
+  color: var(--pp-text);
+}
+
+.pp-swade-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pp-swade-modal-title {
+  font-weight: 900;
+  font-size: 1.1rem;
+  color: var(--pp-accent);
+}
+
+.pp-swade-item-card-host,
+.pp-swade-result-list {
+  overflow: visible;
+  max-height: min(70vh, 640px);
+  color: var(--pp-text);
+}
+
+.pp-swade-result-block {
+  margin-top: 10px;
+  border-top: 1px solid var(--pp-line);
+  background: var(--pp-bg);
+  border-radius: var(--pp-radius);
+}
+
+/* Only show trait/damage roll buttons on the item card */
+.pp-swade-item-card-host .card-buttons:not(.trait-rolls):not(.damage-rolls) {
+  display: none !important;
+}
+
+.pp-swade-result-list .swade-roll-message .targets {
+  display: none !important;
+}
+
+.pp-swade-item-card-host .chat-card,
+.pp-swade-result-block .swade-roll-message {
+  background: transparent !important;
+  color: var(--pp-text) !important;
+}
+
+.pp-swade-item-card-host button,
+.pp-swade-result-block button {
+  width: 100% !important;
+  min-height: 46px !important;
+  margin: 0 !important;
+  padding: 9px 12px !important;
+  color: #f4f8fa !important;
+  background: #273743 !important;
+  border: 1px solid rgba(157, 215, 255, 0.38) !important;
+  border-radius: 5px !important;
+  font-size: 0.96rem !important;
+  font-weight: 900 !important;
+}
+
+.pp-swade-item-card-host button:hover,
+.pp-swade-result-block button:hover {
+  background: var(--pp-accent) !important;
+  color: var(--pp-panel) !important;
+  border-color: var(--pp-accent) !important;
+}
+
+.pp-swade-item-card-host button:disabled,
+.pp-swade-result-block button:disabled {
+  opacity: 0.48 !important;
+}
+
+.pp-swade-item-card-host .actions-subheading {
+  font-size: 20px;
+}
+
+.pp-swade-item-card-host .card-footer span {
+  font-size: 16px;
+}
+
+.pp-swade-item-card-host .card-footer {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+/* The image and item-name button don't add much here, so hide the whole header */
+.pp-swade-item-card-host .card-header {
+  display: none !important;
+}
+
+/* Hide the standard chat message appearance. */
+.pp-swade-item-card-host .chat-message,
+.pp-swade-result-block .chat-message {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
+.pp-swade-result-block .chat-message {
+  padding: 1rem;
+}
+
+.pp-swade-item-card-host .message-header,
+.pp-swade-result-block .message-header {
+  display: none !important;
+}
+
+/* We can't resolve damage from player pilot so instead hide the button */
+.pp-swade-result-block .wounds-calc {
+  display: none !important;
+}
+
+/* Default player pilot has a rule for dice-tooltip which conflicts with swade so we set it back again here */
+body.player-pilot-active .dice-result .dice-tooltip {
+  display: grid !important;
 }
