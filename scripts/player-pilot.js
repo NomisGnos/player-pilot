@@ -2934,7 +2934,7 @@ function findItem(itemId) {
   return actor?.items?.get?.(itemId) ?? null;
 }
 
-export function openModal(content, handlers = {}, options = { closeOnOutsideClick: true }) {
+export function openModal(content, handlers = {}, options = { closeOnOutsideClick: true, onCloseModal: undefined }) {
   closeModal();
   document.querySelector(".pp-result-toast")?.remove();
   const modal = document.createElement("section");
@@ -2943,6 +2943,7 @@ export function openModal(content, handlers = {}, options = { closeOnOutsideClic
   document.body.appendChild(modal);
   document.body.classList.add("player-pilot-modal-open");
   state.modal = modal;
+  state.onCloseModal = options.onCloseModal;
   modal.addEventListener("click", async (event) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
     const button = target?.closest?.("[data-modal-action]");
@@ -2976,6 +2977,8 @@ export function closeModal() {
   if (modalApp) modalApp.close({ animate: false });
   state.modal?.remove();
   state.modal = null;
+  state.onCloseModal?.();
+  state.onCloseModal = null;
   document.body.classList.remove("player-pilot-modal-open");
 }
 
