@@ -7610,6 +7610,15 @@ function registerHooks() {
       queueRender();
     }
   });
+  const activeEffectChanged = (effect) => {
+    if (userIsPilot() && String(effect?.actor?.id ?? "") === String(state.actorId ?? "")) {
+      invalidateModelCache();
+      queueRender();
+    }
+  };
+  Hooks.on("createActiveEffect", activeEffectChanged);
+  Hooks.on("updateActiveEffect", activeEffectChanged);
+  Hooks.on("deleteActiveEffect", activeEffectChanged);
   Hooks.on("sfcReady", () => {
     if (userIsPilot()) {
       invalidateModelCache();
