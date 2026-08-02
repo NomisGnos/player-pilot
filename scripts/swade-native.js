@@ -128,7 +128,7 @@ function onCreateChatMessage(message) {
   if (resultsList) addRollResult(resultsList, message);
 }
 
-function onRenderRollDialog(app, html) {
+function onRenderRollDialog(app) {
   const oldClose = app.close.bind(app);
   app.close = (options) => oldClose({ ...options, animate: false });
 
@@ -140,11 +140,62 @@ function onRenderRollDialog(app, html) {
     document.body.appendChild(backdrop);
     app._ppBackdrop = backdrop;
   }
+
+  positionModifiersDropdown(app);
+  createToggleObserver(app);
+}
+
+/**
+ * We want the modifiers dropdown to be anchored to the bottom of the header
+ * This requires us to do a bit of shuffling to properly calculate and apply the position
+ */
+function positionModifiersDropdown(app) {
+  const header = app.window?.header;
+  const dropdown = app.element?.querySelector(".presets .dropdown");
+  if (!header || !dropdown) return;
+
+  //Zero the top so we can get the proper offset
+  const previousTop = dropdown.style.top;
+  dropdown.style.top = "0px";
+  const actualOrigin = dropdown.getBoundingClientRect().top;
+  dropdown.style.top = previousTop;
+
+  const headerBottom = header.getBoundingClientRect().bottom;
+  app.element.style.setProperty("--pp-roll-dialog-header-bottom", `${headerBottom - actualOrigin}px`);
+}
+
+/**
+ * The dropdown is a full-height overlay which covers the toggle button that's normally used to open/close it
+ * While the dropdown is open, move the button inside the dropdown so it's still usable
+ */
+function createToggleObserver(app) {
+  const presets = app.element.querySelector(".presets");
+  const dropdown = presets?.querySelector(".dropdown");
+  const toggleButton = presets?.querySelector(".toggle-list");
+  if (!dropdown || !toggleButton) return;
+  if (dropdown._ppToggleConfigured) return;
+  dropdown._ppToggleConfigured = true;
+
+  const positionToggleButton = () => {
+    if (dropdown.classList.contains("collapsed")) {
+      presets.insertBefore(toggleButton, dropdown);
+    } else {
+      dropdown.insertBefore(toggleButton, dropdown.firstElementChild);
+    }
+  };
+
+  app._ppToggleObserver?.disconnect();
+  app._ppToggleObserver = new MutationObserver(positionToggleButton).observe(dropdown, {
+    attributes: true,
+    attributeFilter: ["class"]
+  });
 }
 
 function onCloseRollDialog(app) {
   app._ppBackdrop?.remove();
   app._ppBackdrop = null;
+  app._ppToggleObserver?.disconnect();
+  app._ppToggleObserver = null;
   removeHook("renderRollDialog");
   removeHook("closeRollDialog");
 }

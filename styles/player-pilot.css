@@ -7318,10 +7318,25 @@ body.player-pilot-modal-open .brsw-damage-roll-damage > span::before {
   border-radius: 10px 10px 0 0;
 }
 
-.pp-swade-modal-title {
-  font-weight: 900;
-  font-size: 1.1rem;
-  color: var(--pp-accent);
+.pp-swade-modal-title,
+.pp-native-prompt.roll-dialog .window-header .window-title {
+  font-weight: 900 !important;
+  font-size: 1.1rem !important;
+  color: var(--pp-accent) !important;
+}
+
+.pp-native-prompt.roll-dialog .header-control {
+  font-family: var(--font-awesome);
+  width: var(--pp-tap);
+  min-width: var(--pp-tap);
+  height: var(--pp-tap);
+  border: 1px solid var(--pp-line);
+  border-radius: var(--pp-radius);
+  background: var(--pp-panel-2);
+}
+
+.pp-native-prompt.roll-dialog .header-control:hover {
+  text-shadow: none;
 }
 
 .pp-swade-item-card-host,
@@ -7423,4 +7438,89 @@ body.player-pilot-modal-open .brsw-damage-roll-damage > span::before {
 /* Default player pilot has a rule for dice-tooltip which conflicts with swade so we set it back again here */
 body.player-pilot-active .dice-result .dice-tooltip {
   display: grid !important;
+}
+
+.pp-native-prompt.roll-dialog .presets .dropdown {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--pp-roll-dialog-header-bottom, 4rem);
+  bottom: 0;
+  width: 100% !important;
+  max-height: none;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-panel);
+  z-index: 10;
+}
+
+.pp-native-prompt.roll-dialog .presets .dropdown.collapsed {
+  padding: 0;
+  border: none;
+  overflow: hidden;
+}
+
+.pp-native-prompt.roll-dialog .presets .selections {
+  max-height: none;
+}
+
+.pp-native-prompt.roll-dialog .presets .searchBox {
+  min-height: var(--pp-tap);
+  width: 100%;
+  margin-bottom: 0;
+  padding: 0 12px;
+  border-radius: var(--pp-radius);
+  border: 1px solid var(--pp-line);
+  background: #0f1318;
+  color: var(--pp-text);
+}
+
+.pp-native-prompt.roll-dialog .presets .dropdown > .toggle-list {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--pp-tap);
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: var(--pp-radius);
+  border: 1px solid var(--pp-line);
+  background: var(--pp-panel-2);
+  color: var(--pp-text);
+}
+
+.pp-native-prompt.roll-dialog .presets .group-header {
+  margin: 10px 4px 4px;
+  color: var(--pp-accent);
+  font-size: 20px;
+}
+
+.pp-native-prompt.roll-dialog .presets .modifier {
+  width: 100%;
+  margin: 6px 0;
+  padding: 0;
+}
+
+.pp-native-prompt.roll-dialog .presets .modifier button.add-preset {
+  justify-content: center;
+  min-height: var(--pp-tap);
+  width: 100%;
+  margin: 0;
+  font-size: 1rem;
+  line-height: normal;
+  font-weight: 700;
+  border-radius: var(--pp-radius);
+  border: 1px solid var(--pp-line);
+  background: var(--pp-panel-2);
+  color: var(--pp-text);
+}
+
+.pp-native-prompt.roll-dialog .presets .modifier button.add-preset:hover,
+.pp-native-prompt.roll-dialog .presets .modifier button.add-preset:focus-visible {
+  background: var(--pp-accent);
+  color: var(--pp-panel);
+  border-color: var(--pp-accent);
+  outline: none;
+  box-shadow: none;
 }
