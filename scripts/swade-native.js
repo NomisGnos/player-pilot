@@ -9,14 +9,6 @@ function addHook(name, fn) {
   activeHooks.add({ name, id: hookId });
 }
 
-function removeHook(name) {
-  const hook = activeHooks.find(h => h.name === name);
-  if (hook != null) {
-    Hooks.off(hook.name, hook.id);
-    activeHooks.delete(hook);
-  }
-}
-
 function removeAllHooks() {
   for (const hook of activeHooks) {
     Hooks.off(hook.name, hook.id);
@@ -103,10 +95,16 @@ async function runTraitRoll(traitName, performRoll) {
   addHook("closeRollDialog", onCloseRollDialog);
 
   const roll = await performRoll();
-  if (!roll?.messageId) return; // Dialog was cancelled
+  if (!roll?.messageId) {
+    removeAllHooks();
+    return; // Dialog was cancelled
+  }
 
   const message = game.messages?.get(roll.messageId);
-  if (!message) return;
+  if (!message) {
+    removeAllHooks();
+    return;
+  }
 
   const modalRoot = openSwadeRollShell('<div class="pp-swade-result-list"></div>');
   const modalTitle = modalRoot.querySelector(".pp-swade-modal-title");
@@ -196,8 +194,6 @@ function onCloseRollDialog(app) {
   app._ppBackdrop = null;
   app._ppToggleObserver?.disconnect();
   app._ppToggleObserver = null;
-  removeHook("renderRollDialog");
-  removeHook("closeRollDialog");
 }
 
 async function addRollResult(resultsList, message) {
