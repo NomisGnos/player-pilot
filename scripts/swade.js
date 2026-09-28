@@ -71,6 +71,46 @@ export class SwadeModel extends BaseModel {
     toggleStatusEffect: function (event, button) {
       this.currentActor.toggleActiveEffect(button.dataset.id);
     },
+    wounds: async function (event, button) {
+      const actor = this.currentActor;
+      if (!actor) return;
+      const delta = Number(button.dataset.delta);
+      if (!delta) return;
+
+      const currentWounds = actor.system.wounds.value;
+      const maxWounds = actor.system.wounds.max;
+      const dataKey = `system.wounds.value`;
+
+      if (delta > 0) {
+        if (currentWounds >= maxWounds) return;
+        const newWounds = Math.min(currentWounds + delta, maxWounds);
+        actor.update({ [dataKey]: newWounds });
+      } else {
+        if (currentWounds === 0) return;
+        const newWounds = Math.max(currentWounds + delta, 0);
+        actor.update({ [dataKey]: newWounds });
+      }
+    },
+    fatigue: async function (event, button) {
+      const actor = this.currentActor;
+      if (!actor) return;
+      const delta = Number(button.dataset.delta);
+      if (!delta) return;
+
+      const currentFatigue = actor.system.fatigue.value;
+      const maxFatigue = actor.system.fatigue.max;
+      const dataKey = `system.fatigue.value`;
+
+      if (delta > 0) {
+        if (currentFatigue >= maxFatigue) return;
+        const newFatigue = Math.min(currentFatigue + delta, maxFatigue);
+        actor.update({ [dataKey]: newFatigue });
+      } else {
+        if (currentFatigue === 0) return;
+        const newFatigue = Math.max(currentFatigue + delta, 0);
+        actor.update({ [dataKey]: newFatigue });
+      }
+    },
     benny: async function (event, button) {
       const actor = this.currentActor;
       if (!actor) return;

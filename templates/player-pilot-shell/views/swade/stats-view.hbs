@@ -9,7 +9,11 @@
           <div class="pp-hp-panel pp-fatigue pp-compact-card">
             <div class="pp-hp-copy">
               <span><i class="fas fa-face-hand-yawn"></i> Fatigue</span>
-              <strong>{{summary.fatigue.display}}</strong>
+              <div class="pp-hp-control">
+                <button type="button" data-action="fatigue" data-delta="-1"><i class="fas fa-minus"></i></button>
+                <strong>{{summary.fatigue.display}}</strong>
+                <button type="button" data-action="fatigue" data-delta="1"><i class="fas fa-plus"></i></button>
+              </div>
             </div>
             <div class="pp-hp-track" aria-label="Hit points">
               <div class="pp-hp-fill" style="width:{{summary.fatigue.pct}}%"></div>
@@ -20,7 +24,11 @@
           <div class="pp-hp-panel pp-compact-card">
             <div class="pp-hp-copy">
               <span><i class="fas fa-heart-pulse"></i> Wounds</span>
-              <strong>{{summary.wounds.display}}</strong>
+              <div class="pp-hp-control">
+                <button type="button" data-action="wounds" data-delta="-1"><i class="fas fa-minus"></i></button>
+                <strong>{{summary.wounds.display}}</strong>
+                <button type="button" data-action="wounds" data-delta="1"><i class="fas fa-plus"></i></button>
+              </div>
             </div>
             <div class="pp-hp-track" aria-label="Hit points">
               <div class="pp-hp-fill" style="width:{{summary.wounds.pct}}%"></div>

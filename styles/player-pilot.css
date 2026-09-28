@@ -1506,6 +1506,12 @@ body.player-pilot-active.player-pilot-shared-popups .application[data-applicatio
   font-weight: 800;
 }
 
+.pp-hp-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .pp-hit-dice {
   display: flex;
   align-items: center;

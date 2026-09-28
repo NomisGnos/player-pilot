@@ -1,3 +1,4 @@
 .vscode/
 /node_modules
 templates/player-pilot-shell/template_paths.bat
+*.lock
