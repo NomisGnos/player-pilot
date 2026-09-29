@@ -5,7 +5,7 @@ import { PlayerPilotShell } from "./player-pilot-shell.js";
 import { SF2eModel } from "./sf2e.js";
 import { SwadeModel } from "./swade.js";
 import { UseItemDialog } from "./use-item-dialog.js";
-import { tokenFootprintDistanceFeet } from "./geometry.js";
+import { sortTokensByDistance, tokenFootprintDistanceFeet } from "./geometry.js";
 import {
   captureChatMessage,
   configureChatFeed,
@@ -17,9 +17,11 @@ import {
   clearDiceOverlay,
   configureDiceOverlay,
   exposeDiceApi,
+  hideWaitingDiceOverlay,
   prepareRollSocket,
   registerDiceSettings,
   resolveDiceRequest,
+  rollMessageLabel,
   rollSummariesFrom,
   showDiceResult
 } from "./dice-overlay.js";
@@ -486,6 +488,7 @@ export const state = {
   selectedTargets: {},
   selectedTokenId: "",
   mapSnapshot: null,
+  pendingMapPlacementUse: null,
   mapZoom: 1,
   mapPanX: 0,
   mapPanY: 0,
@@ -803,7 +806,6 @@ function combatTokenIdsForScene(sceneId) {
   return asArray(combat.combatants)
     .filter((combatant) => {
       if (!combatant) return false;
-      if (combatant.defeated === true || combatant.isDefeated === true) return false;
       const tokenDoc = combatant.token
         ?? getSceneDoc(sceneId)?.tokens?.get?.(combatant.tokenId)
         ?? asArray(getSceneDoc(sceneId)?.tokens).find((token) => String(token?.id ?? "") === String(combatant.tokenId ?? ""))
@@ -1037,12 +1039,19 @@ async function enrichRulesHtml(value, relativeTo = null) {
 }
 
 function itemRequiresMapPlacement(item, activityId = "") {
-  if (item?.type !== "spell") return false;
-  const selected = activityId ? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity : null;
+  if (!item) return false;
+  const selectedEntry = activityId ? game.playerPilot.model.selectedItemActivity(item, activityId) : null;
+  const selected = selectedEntry?.activity ?? null;
   const sources = selected
-    ? [game.playerPilot.model.activitySystem(selected), item?.system]
+    ? [
+      game.playerPilot.model.activitySystem(selected),
+      ...(game.playerPilot.model.getItemActivities(item).length > 1 ? [] : [item?.system])
+    ]
     : [item?.system, ...game.playerPilot.model.getItemActivities(item).map(game.playerPilot.model.activitySystem)];
   if (sources.some((source) => fieldText(source?.target?.template?.type, source?.target?.area?.type))) return true;
+  const selectedType = String(selectedEntry?.type ?? game.playerPilot.model.activitySystem(selected)?.type ?? "").toLowerCase();
+  const selectedName = String(selectedEntry?.name ?? "").trim().toLowerCase();
+  if (selected && (selectedType === "attack" || selectedName === "attack")) return false;
   const text = htmlToPlain(item?.system?.description?.value ?? item?.system?.description ?? "").toLowerCase();
   const name = String(item?.name ?? "").toLowerCase();
   if (/\bmisty step\b/.test(name) || /\bteleport(?:s|ed|ing)?\b/.test(text)) return true;
@@ -2499,6 +2508,12 @@ function renderTargetStateBadges(token = {}) {
 }
 
 function renderMapView() {
+  const pendingPlacement = state.pendingMapPlacementUse;
+  const placementStatus = pendingPlacement
+    ? (pendingPlacement.placementRequestId
+      ? `Location sent for ${pendingPlacement.itemName || "the action"}. Waiting for the GM client to receive the ping.`
+      : `Choose a point for ${pendingPlacement.itemName || "the action"}. Player Pilot will start it after the GM receives your ping.`)
+    : "";
   return `
     <section class="pp-view active">
       <div class="pp-dpad-wrap">
@@ -2525,6 +2540,12 @@ function renderMapView() {
       </div>
       <div class="pp-section">
         ${renderSectionHeader("Ping On Map", "fa-map-location-dot")}
+        ${placementStatus ? `
+          <div class="pp-placement-prompt" role="status">
+            <i class="fas ${pendingPlacement.placementRequestId ? "fa-satellite-dish" : "fa-map-pin"}"></i>
+            <div><strong>${pendingPlacement.placementRequestId ? "Sending chosen point" : "Choose placement first"}</strong><span>${escapeHtml(placementStatus)}</span></div>
+          </div>
+        ` : ""}
         <div class="pp-two-col">
           <button class="pp-button primary" type="button" data-action="request-map">Request Snapshot</button>
           <button class="pp-button" type="button" data-action="clear-map">Clear</button>
@@ -3031,6 +3052,26 @@ function openConcentrationBreakDialog(itemId, item, effect) {
   });
 }
 
+function quickSelfUseOptions(model, item) {
+  if (model.id !== "dnd5e" || item?.type === "spell" || !model.itemIsFeatureType?.(item)) return null;
+  const activities = model.usableItemActivities?.(item) ?? [];
+  const playerChoice = model.itemPlayerChoice?.(item) ?? null;
+  if (activities.length > 1 || playerChoice) return null;
+  const activity = activities[0] ?? null;
+  const activityId = String(activity?.id ?? "");
+  const targetInfo = model.itemTargetInfo(item, activityId);
+  if (!targetInfo.implicitSelf || targetInfo.needsTarget || targetInfo.canTarget) return null;
+  if ((model.ammoChoices?.(item) ?? []).length) return null;
+  if (itemRequiresMapPlacement(item, activityId)) return null;
+  const options = {
+    activityId,
+    activityName: String(activity?.name ?? "")
+  };
+  const instructions = model.collectRollInstructions?.(item, options) ?? [];
+  if (instructions.some((entry) => entry.formula || entry.nativeAction)) return null;
+  return options;
+}
+
 function openUseDialog(itemId, flowOptions = {}) {
   if (pilotPaused()) {
     warnPaused();
@@ -3064,6 +3105,15 @@ function openUseDialog(itemId, flowOptions = {}) {
     return;
   }
 
+  const quickOptions = quickSelfUseOptions(model, item);
+  if (quickOptions) {
+    void useItem(itemId, quickOptions, { showReminder: false }).catch((error) => {
+      console.error(`Player Pilot could not use ${item.name}.`, error);
+      ui.notifications?.error?.(`${itemDisplayName(item)} failed.`);
+    });
+    return;
+  }
+
   closeModal();
   const dialog = new UseItemDialog({
     actor,
@@ -3085,7 +3135,9 @@ function openUseDialog(itemId, flowOptions = {}) {
       openManualRollDialog,
       openPingOnMap,
       outOfTurnWarning,
+      pingTargetToken,
       pilotPaused,
+      recordTargetDiagnostic,
       renderCastPreview,
       renderModalTargetPicker,
       renderRollInstructions,
@@ -3163,6 +3215,9 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
   const sneakAttack = model.id === "dnd5e" && item.type === "weapon" ? getSneakAttackOption(actor) : null;
   const targetInfoFor = (activityId = "") => model.itemTargetInfo(item, activityId);
   const rangeFeetFor = (activityId = "") => model.getItemRangeFeet?.(item, activityId);
+  const sourceTokenIdFor = (activityId = "") => model.itemActivitySourceTokenId?.(item, activityId) ?? "";
+  const activityUsesSpellSlot = (activityId = "") => item.type === "spell"
+    && model.itemActivityUsesSpellSlot?.(item, activityId) !== false;
   let targetInfo = targetInfoFor(defaultActivityId);
   let targetStep = targetInfo.needsTarget || targetInfo.canTarget;
   let targetsResetForUse = false;
@@ -3172,7 +3227,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     clearUseTargets();
   };
   if (!activityStep && targetStep) resetTargetsForUse();
-  const spellStep = item.type === "spell" && (!model.usesSpellRanks || slots.length > 0);
+  let spellStep = activityUsesSpellSlot(defaultActivityId) && (!model.usesSpellRanks || slots.length > 0);
   const refreshSneakAttackChoice = (modal, activityId = defaultActivityId) => {
     if (!sneakAttack) return null;
     const control = modal.querySelector("[data-sneak-attack-control]");
@@ -3186,12 +3241,15 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     const useSneakAttack = sneakAttack && modal.querySelector("[name='useSneakAttack']")?.checked === true;
     const activityId = modal.querySelector("[name='activityId']")?.value ?? defaultActivityId;
     const activity = activities.find((entry) => entry.id === activityId);
+    const castLevel = activityUsesSpellSlot(activityId)
+      ? (modal.querySelector("[name='castLevel']")?.value ?? defaultCastLevel ?? "")
+      : baseCastLevel;
     return {
       activityId,
       activityName: activity?.name ?? "",
       playerChoice: modal.querySelector("[name='playerChoice']")?.value ?? "",
       playerChoiceLabel: playerChoice?.label ?? "",
-      castLevel: modal.querySelector("[name='castLevel']")?.value ?? defaultCastLevel ?? "",
+      castLevel,
       ammoItemId: modal.querySelector("[name='ammoItemId']")?.value ?? "",
       sneakAttackFormula: useSneakAttack ? sneakAttack.formula : "",
       replaceConcentrationEffectId: activeConcentration?.id ?? ""
@@ -3219,8 +3277,8 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     return { options, currentInstructions };
   };
   const finishUseFlow = async (modal, options, currentInstructions) => {
-    await useItem(itemId, options, { showReminder: false });
     const placementNeeded = itemRequiresMapPlacement(item, options.activityId);
+    if (!placementNeeded) await useItem(itemId, options, { showReminder: false });
     if (!hasFollowupRolls(currentInstructions) && !placementNeeded) {
       closeModal();
       return;
@@ -3229,11 +3287,13 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     modal.querySelector("[data-use-step='rolls']")?.classList?.remove?.("hidden");
     const title = modal.querySelector("[data-rolls-heading-title]");
     const detail = modal.querySelector("[data-rolls-heading-detail]");
-    if (title && placementNeeded && !hasFollowupRolls(currentInstructions)) title.textContent = "Placement Needed";
+    if (title && placementNeeded) title.textContent = "Choose Placement First";
     if (detail && placementNeeded) detail.textContent = hasFollowupRolls(currentInstructions)
-      ? "After resolving the rolls below, ping the map so the GM knows where to place the effect."
-      : "Ping the map so the GM knows where to place the effect.";
+      ? "Ping the map first. Player Pilot will then start the action and show its remaining roll controls."
+      : "Ping the map first. Player Pilot will start the action after the GM receives your chosen point.";
     modal.querySelector("[data-placement-prompt]")?.classList?.toggle?.("hidden", !placementNeeded);
+    modal.querySelector("[data-roll-instructions]")?.classList?.toggle?.("hidden", placementNeeded);
+    modal.querySelector("[data-sneak-attack-control]")?.classList?.toggle?.("hidden", placementNeeded);
     modal.querySelectorAll(".pp-dialog-actions [data-modal-action]:not([data-modal-action='close'])").forEach((button) => button.classList.add("hidden"));
     const finalButton = modal.querySelector("[data-final-done]");
     if (finalButton instanceof HTMLElement) {
@@ -3265,7 +3325,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     </div>
     <div class="pp-use-step ${!activityStep && targetStep ? "" : "hidden"}" data-use-step="targets">
       <p data-modal-target-summary>${escapeHtml(targetInstructionText(targetInfo))}</p>
-      <div data-modal-target-picker>${renderModalTargetPicker({ ...normalized, targetInfo, rangeFeet: rangeFeetFor(defaultActivityId) })}</div>
+      <div data-modal-target-picker>${renderModalTargetPicker({ ...normalized, targetInfo, rangeFeet: rangeFeetFor(defaultActivityId), sourceTokenId: sourceTokenIdFor(defaultActivityId) })}</div>
     </div>
     <div class="pp-use-step ${!activityStep && !targetStep && spellStep ? "" : "hidden"}" data-use-step="cast">
       ${concentration ? `<p><strong>${escapeHtml(concentration)}</strong></p>` : ""}
@@ -3295,7 +3355,7 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       </div>
       <div class="pp-placement-prompt hidden" data-placement-prompt>
         <i class="fas fa-map-location-dot"></i>
-        <div><strong>Placement needed</strong><span>Use Ping On Map so the GM can place the template, teleport, or chosen point.</span></div>
+        <div><strong>Placement needed</strong><span>Choose the point with Ping On Map before Player Pilot starts the GM-side placement task.</span></div>
       </div>
       ${sneakAttack ? `<div data-sneak-attack-control>${renderSneakAttackChoice(sneakAttack, assessSneakAttackApplicability(actor, item, defaultActivityId))}</div>` : ""}
       <div data-roll-instructions>${renderRollInstructions(instructions, true)}</div>
@@ -3313,13 +3373,14 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
       const { options } = refreshRollInstructions(modal);
       targetInfo = targetInfoFor(options.activityId);
       targetStep = targetInfo.needsTarget || targetInfo.canTarget;
+      spellStep = activityUsesSpellSlot(options.activityId) && (!model.usesSpellRanks || slots.length > 0);
       if (targetStep) resetTargetsForUse();
       modal.querySelector("[data-use-step='activity']")?.classList?.add?.("hidden");
       modal.querySelector("[data-modal-action='nextActivityStep']")?.classList?.add?.("hidden");
       const targetSummary = modal.querySelector("[data-modal-target-summary]");
       if (targetSummary) targetSummary.textContent = targetInstructionText(targetInfo);
       const picker = modal.querySelector("[data-modal-target-picker]");
-      if (picker) picker.innerHTML = renderModalTargetPicker({ ...normalized, targetInfo, rangeFeet: rangeFeetFor(options.activityId) });
+      if (picker) picker.innerHTML = renderModalTargetPicker({ ...normalized, targetInfo, rangeFeet: rangeFeetFor(options.activityId), sourceTokenId: sourceTokenIdFor(options.activityId) });
       if (targetStep) {
         modal.querySelector("[data-use-step='targets']")?.classList?.remove?.("hidden");
         modal.querySelector("[data-modal-action='nextTargetStep']")?.classList?.remove?.("hidden");
@@ -3352,16 +3413,25 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
         selected.add(tokenId);
       }
       setSelectedTargetSet(sceneId, selected);
-      game.playerPilot.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+      try {
+        game.playerPilot.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+      } catch (error) {
+        console.warn("Player Pilot could not paint the local Foundry target marker.", error);
+      }
       for (const targetButton of _modal.querySelectorAll("[data-modal-action='modalToggleTarget'][data-token-id]")) {
         const isSelected = selected.has(String(targetButton.dataset.tokenId ?? ""));
         targetButton.closest(".pp-token-row")?.classList?.toggle?.("selected", isSelected);
         targetButton.classList.toggle("primary", isSelected);
-        targetButton.textContent = isSelected ? "Targeted" : "Target";
+        const label = targetButton.querySelector("span");
+        if (label) label.textContent = isSelected ? "Targeted" : "Target";
       }
       updateModalTargetCount(selected.size, targetInfo);
       refreshSneakAttackChoice(_modal, _modal.querySelector("[name='activityId']")?.value ?? defaultActivityId);
+      recordTargetDiagnostic("player-select", { sceneId, targetIds: Array.from(selected) });
       sendSocket("targetUpdate", { actorId: state.actorId, sceneId, targetIds: Array.from(selected) });
+    },
+    pingModalTarget: async (_modal, button) => {
+      await pingTargetToken(button?.dataset?.tokenId ?? "");
     },
     nextTargetStep: async (modal) => {
       if (pilotPaused()) {
@@ -3414,9 +3484,17 @@ function legacyOpenUseDialog(itemId, flowOptions = {}) {
     nativeInstruction: async (_modal, button) => {
       await runNativeItemRoll(item, button.dataset.nativeAction ?? "", button.dataset.castRank, button.dataset.attackNumber);
     },
-    goToPing: async () => {
+    goToPing: async (modal) => {
+      const options = readUseOptions(modal);
+      const showReminder = hasFollowupRolls(model.collectRollInstructions?.(item, options));
       closeModal();
-      openPingOnMap();
+      openPingOnMap({
+        actorId: actor.id,
+        itemId: item.id,
+        itemName: item.name,
+        options,
+        showReminder
+      });
     },
     change: async (modal, target) => {
       if (target instanceof HTMLInputElement && target.name === "useSneakAttack") {
@@ -3675,14 +3753,35 @@ export function updateModalTargetCount(selected, targetInfo = {}) {
 export function renderModalTargetPicker(item, actionAttribute = "data-modal-action") {
   if (!item?.targetInfo?.needsTarget && !item?.targetInfo?.canTarget) return "";
   const scene = state.scene;
-  const tokens = displayedTargetTokens(scene).filter((token) => item.targetInfo.allowSelf || token.actorId !== state.actorId);
+  const availableTokens = displayedTargetTokens(scene)
+    .filter((token) => item.targetInfo.allowSelf || token.actorId !== state.actorId);
+  const sourceTokenId = String(item?.sourceTokenId ?? "");
+  const source = sourceTokenId
+    ? (asArray(scene?.tokens).find((token) => String(token?.id ?? "") === sourceTokenId) ?? activeTokenForActor())
+    : activeTokenForActor();
+  const tokens = sortTokensByDistance(availableTokens, source, {
+    gridSize: Number(scene?.gridSize ?? 100) || 100,
+    gridDistance: Number(scene?.gridDistance ?? 5) || 5
+  });
   if (!tokens.length) return `<div class="pp-empty">No available targets. If no GM is connected, Player Pilot can only use the locally available scene data.</div>`;
   const selected = selectedTargetSet(scene?.id ?? "");
+  const nameTotals = new Map();
+  const nameIndexes = new Map();
+  for (const token of tokens) {
+    const name = String(token.name ?? "Token");
+    nameTotals.set(name, (nameTotals.get(name) ?? 0) + 1);
+  }
   return `
     <div class="pp-modal-targets">
       <div class="pp-subtitle pp-group-title"><i class="fas fa-crosshairs"></i><span>Targets</span><em data-modal-target-count>${escapeHtml(targetCountText(selected.size, item.targetInfo))}</em></div>
       <div class="pp-target-list">
-        ${tokens.slice(0, 10).map((token) => renderModalTargetRow(token, selected, item, actionAttribute)).join("")}
+        ${tokens.map((token) => {
+    const name = String(token.name ?? "Token");
+    const index = (nameIndexes.get(name) ?? 0) + 1;
+    nameIndexes.set(name, index);
+    const displayName = Number(nameTotals.get(name) ?? 0) > 1 ? `${name} ${index}` : name;
+    return renderModalTargetRow({ ...token, displayName }, selected, item, actionAttribute);
+  }).join("")}
       </div>
     </div>
   `;
@@ -3693,16 +3792,19 @@ function renderModalTargetRow(token, selected, item, actionAttribute = "data-mod
   const range = targetRangeLabel(token, item);
   const disabled = range?.out === true;
   return `
-    <article class="pp-token-row ${isSelected ? "selected" : ""} ${disabled ? "disabled" : ""}">
+    <article class="pp-token-row ${isSelected ? "selected" : ""} ${disabled ? "target-out-of-range" : ""}">
       <div class="pp-card-img" style="background-image:url('${escapeHtml(token.img)}')"></div>
       <div class="pp-card-main">
-        <div class="pp-card-title"><span>${escapeHtml(token.name)}</span></div>
+        <div class="pp-card-title"><span>${escapeHtml(token.displayName ?? token.name)}</span></div>
         <div class="pp-card-meta">
           ${range ? `<span class="pp-badge ${range.out ? "danger" : "good"}">${escapeHtml(range.text)}</span>` : ""}
           ${renderTargetStateBadges(token)}
         </div>
       </div>
-      <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" ${actionAttribute}="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-token-uuid="${escapeHtml(token.uuid)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</button>
+      <div class="pp-target-row-actions">
+        <button class="pp-button pp-target-locate" type="button" ${actionAttribute}="pingModalTarget" data-token-id="${escapeHtml(token.id)}" title="Ping ${escapeHtml(token.displayName ?? token.name)} on the map"><i class="fas fa-map-pin"></i><span>Locate</span></button>
+        <button class="pp-action-btn ${isSelected ? "primary" : ""}" type="button" ${actionAttribute}="modalToggleTarget" data-token-id="${escapeHtml(token.id)}" data-token-uuid="${escapeHtml(token.uuid)}" data-disabled="${disabled ? "true" : "false"}" ${disabled ? "disabled" : ""}><i class="fas fa-crosshairs"></i><span>${disabled ? "Out of Range" : (isSelected ? "Targeted" : "Target")}</span></button>
+      </div>
     </article>
   `;
 }
@@ -3710,7 +3812,10 @@ function renderModalTargetRow(token, selected, item, actionAttribute = "data-mod
 function targetRangeLabel(targetToken, item) {
   const rangeFeet = Number(item?.rangeFeet ?? 0);
   if (!Number.isFinite(rangeFeet) || rangeFeet <= 0) return null;
-  const source = activeTokenForActor();
+  const sourceTokenId = String(item?.sourceTokenId ?? "");
+  const source = sourceTokenId
+    ? (asArray(state.scene?.tokens).find((token) => String(token?.id ?? "") === sourceTokenId) ?? activeTokenForActor())
+    : activeTokenForActor();
   if (!source || !targetToken) return null;
   const distance = tokenDistanceFeet(source, targetToken);
   if (!Number.isFinite(distance)) return null;
@@ -3867,7 +3972,7 @@ export function renderRollInstructions(instructions = [], allowManual = true, ac
             </div>
           ` : (allowManual && entry.formula ? `
             <div class="pp-roll-instruction-actions pp-auto-roll-actions">
-              <button class="pp-button primary pp-auto-roll-button" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}" data-workflow-action="${entry.workflowAction === false ? "false" : "true"}">AUTO</button>
+              <button class="pp-button primary pp-auto-roll-button" type="button" ${actionAttribute}="autoInstruction" data-name="${escapeHtml(entry.label)}" data-formula="${escapeHtml(entry.formula)}" data-roll-kind="${escapeHtml(String(entry.kind ?? "roll").toLowerCase())}" data-activity-id="${escapeHtml(entry.activityId ?? "")}" data-workflow-action="${entry.workflowAction === false ? "false" : "true"}">AUTO</button>
               <output class="pp-auto-roll-result" data-auto-roll-result aria-live="polite"></output>
             </div>
           ` : "")}
@@ -4010,7 +4115,7 @@ async function autoRollInstruction(item, data = {}, control = {}) {
     label: String(data.name ?? "Roll"),
     rollLabel: String(data.name ?? "Roll"),
     rollKind: kind,
-    activityId: String(control.options?.activityId ?? ""),
+    activityId: String(data.activityId || control.options?.activityId || ""),
     useRequestId: String(control.useRequestId ?? ""),
     sceneId: state.scene?.id ?? "",
     targetIds: Array.from(selectedTargetSet(state.scene?.id ?? ""))
@@ -4204,7 +4309,15 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
     ui.notifications?.warn?.(message);
     return;
   }
-  const targetIds = Array.from(selectedTargetSet(state.scene?.id ?? ""));
+  const sceneId = String(state.scene?.id ?? "");
+  const targetInfo = game.playerPilot.model.itemTargetInfo(item, options.activityId);
+  const selfToken = targetInfo.implicitSelf ? activeTokenForActor(actor.id) : null;
+  const targetIds = targetInfo.implicitSelf
+    ? (selfToken?.id ? [String(selfToken.id)] : [])
+    : Array.from(selectedTargetSet(sceneId));
+  if (targetInfo.implicitSelf && targetIds.length) {
+    game.playerPilot.model.applyTargetsForCurrentUser(targetIds, sceneId);
+  }
   if (activeGmIds().length) {
     const useRequestId = foundry.utils.randomID();
     sendSocket("useItem", {
@@ -4213,7 +4326,7 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
       rollLabel: itemDisplayName(item),
       options,
       useRequestId,
-      sceneId: state.scene?.id ?? "",
+      sceneId,
       targetIds
     });
     showResultToast(`${itemDisplayName(item)} sent`, targetIds.length ? `${targetIds.length} target${targetIds.length === 1 ? "" : "s"}` : "");
@@ -4222,13 +4335,17 @@ async function useItem(itemId, options = {}, uiOptions = {}) {
   }
   await executePlayerFirst(
     `Use ${item.name}`,
-    async () => game.playerPilot.model.useItem(actor, item, options),
+    async () => game.playerPilot.model.useItem(actor, item, {
+      ...options,
+      playerPilotSceneId: sceneId,
+      playerPilotTargetIds: targetIds
+    }),
     "useItem",
     {
       actorId: actor.id,
       itemId,
       options,
-      sceneId: state.scene?.id ?? "",
+      sceneId,
       targetIds
     }
   );
@@ -4432,6 +4549,21 @@ function targetIdsForCurrentUser() {
   return asArray(game.user?.targets).map((token) => String(token.id ?? token.document?.id ?? "")).filter(Boolean);
 }
 
+function recordTargetDiagnostic(stage, details = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    stage: String(stage ?? "target"),
+    userId: String(game.user?.id ?? ""),
+    ...details
+  };
+  const previous = Array.isArray(globalThis.playerPilotTargetLog)
+    ? globalThis.playerPilotTargetLog
+    : [];
+  globalThis.playerPilotTargetLog = [...previous, entry].slice(-30);
+  console.info(`[Player Pilot][Target ${entry.stage}]`, entry);
+  return entry;
+}
+
 async function applyTargets() {
   const sceneId = state.scene?.id ?? "";
   const targetIds = Array.from(selectedTargetSet(sceneId));
@@ -4458,6 +4590,16 @@ function pointPayloadForToken(token) {
     y: Number(token.y ?? 0) + (Number(token.height ?? 1) * grid / 2),
     label: token.name ?? "Ping"
   };
+}
+
+async function pingTargetToken(tokenId) {
+  const token = state.scene?.tokens?.find?.((entry) => String(entry.id) === String(tokenId));
+  if (!token) return;
+  const payload = pointPayloadForToken(token);
+  if (!sendSocket("pingPoint", payload)) {
+    drawLocalPing({ ...payload, userId: game.user?.id, color: game.user?.color });
+  }
+  addLog(`Locate ${token.name ?? "target"}`);
 }
 
 async function pingActiveToken() {
@@ -4995,7 +5137,16 @@ function requestMapSnapshot() {
   addLog("Map snapshot requested");
 }
 
-function openPingOnMap() {
+function openPingOnMap(pendingUse = null) {
+  state.pendingMapPlacementUse = pendingUse ? {
+    actorId: String(pendingUse.actorId ?? state.actorId ?? ""),
+    itemId: String(pendingUse.itemId ?? ""),
+    itemName: String(pendingUse.itemName ?? "Action"),
+    options: { ...(pendingUse.options ?? {}) },
+    showReminder: pendingUse.showReminder === true,
+    placementRequestId: ""
+  } : null;
+  state.mapSnapshot = null;
   state.activeTab = "map";
   state.navOpen = false;
   state.mapZoom = 1;
@@ -5007,6 +5158,7 @@ function openPingOnMap() {
 
 function handleMapSnapshotClick(event, node) {
   if (!state.mapSnapshot?.image) return;
+  if (state.pendingMapPlacementUse?.placementRequestId) return;
   if (Date.now() < Number(state.mapSuppressClickUntil ?? 0)) return;
   if (state.mapDrag?.moved) return;
   const img = node.querySelector("img");
@@ -5014,12 +5166,22 @@ function handleMapSnapshotClick(event, node) {
   const rect = img.getBoundingClientRect();
   const nx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
   const ny = clamp((event.clientY - rect.top) / rect.height, 0, 1);
-  sendSocket("mapSnapshotPing", {
+  const placementRequestId = state.pendingMapPlacementUse ? foundry.utils.randomID() : "";
+  const sent = sendSocket("mapSnapshotPing", {
     requestId: state.mapSnapshot.requestId,
     sceneId: state.mapSnapshot.sceneId,
     nx,
-    ny
+    ny,
+    placementRequestId
   });
+  if (!sent) {
+    ui.notifications?.warn?.("No GM is connected for Ping On Map.");
+    return;
+  }
+  if (placementRequestId) {
+    state.pendingMapPlacementUse.placementRequestId = placementRequestId;
+    queueRender();
+  }
   addLog("Map ping sent");
 }
 
@@ -5031,7 +5193,7 @@ function registerChatCapture() {
     const rolls = Array.isArray(message.rolls) ? message.rolls : [];
     if (rolls.length) {
       const roll = rolls[0];
-      addLog(message.flavor || message.speaker?.alias || "Roll", {
+      addLog(rollMessageLabel(message), {
         total: roll.total,
         formula: roll.formula
       });
@@ -5083,6 +5245,10 @@ async function handleSocket(data) {
 }
 
 async function handlePlayerSocket(data) {
+  if (data.type === "cprButtonPrompt") {
+    openPilotCprButtonPrompt(data);
+    return;
+  }
   if (data.type === "reactionPrompt") {
     openPilotReactionPrompt(data);
     return;
@@ -5140,6 +5306,26 @@ async function handlePlayerSocket(data) {
     addLog("Map snapshot cancelled");
     return;
   }
+  if (data.type === "mapPlacementReady") {
+    const pending = state.pendingMapPlacementUse;
+    if (!pending || String(pending.placementRequestId ?? "") !== String(data.placementRequestId ?? "")) return;
+    if (data.failed === true) {
+      pending.placementRequestId = "";
+      ui.notifications?.warn?.(data.message ?? "The GM client could not receive that placement ping. Try again.");
+      queueRender();
+      return;
+    }
+    state.pendingMapPlacementUse = null;
+    if (String(state.actorId ?? "") !== String(pending.actorId ?? "")) {
+      ui.notifications?.warn?.(`${pending.itemName || "That action"} was not started because the selected actor changed.`);
+      queueRender();
+      return;
+    }
+    addLog(`${pending.itemName || "Action"} placement received`);
+    await useItem(pending.itemId, pending.options, { showReminder: pending.showReminder });
+    queueRender();
+    return;
+  }
   if (data.type === "journalImage") {
     if (sharedDocumentPopupsEnabled()) showSharedImage(data.src, Number(data.duration ?? 20));
     return;
@@ -5152,6 +5338,7 @@ const gmDnd5eUses = new Map();
 const gmDnd5eAutoContexts = [];
 let gmDnd5eAutoQueue = Promise.resolve();
 const cprPromptUsersByActor = new Map();
+const pendingGmCprButtonPrompts = new Map();
 const pendingGmReactions = new Map();
 const gmMapSnapshots = new Map();
 const gmSceneStateSentAt = new Map();
@@ -5162,6 +5349,12 @@ const MOVEMENT_BURST_MS = 2500;
 const MOVEMENT_DISPLAY_MS = 4500;
 
 async function handleGmSocket(data) {
+  if (data.type === "cprButtonResponse") {
+    const pending = pendingGmCprButtonPrompts.get(String(data.requestId ?? ""));
+    if (!pending || pending.userId !== String(data.userId ?? "")) return;
+    pending.resolve(String(data.choice ?? ""));
+    return;
+  }
   if (data.type === "reactionResponse") {
     const pending = pendingGmReactions.get(String(data.requestId ?? ""));
     if (!pending || pending.userId !== String(data.userId ?? "")) return;
@@ -5172,7 +5365,7 @@ async function handleGmSocket(data) {
     sendSceneState(data.userId, true);
     return;
   }
-  if (game.paused === true && ["targetUpdate", "moveToken", "rotateToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "dnd5eAutoRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "pingPoint", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
+  if (game.paused === true && ["moveToken", "rotateToken", "movementTrace", "useItem", "rollCheck", "formulaRoll", "dnd5eAutoRoll", "rest", "updateActorData", "updateItemData", "pf2eStrike", "pf2eItemRoll", "pf2eToggleEquipped", "pf2eCurrency", "mapSnapshotRequest", "mapSnapshotPing"].includes(data.type)) {
     sendSocket("commandResult", { targetUserIds: [data.userId], requestId: data.requestId, message: "Game paused", failed: true });
     return;
   }
@@ -5184,6 +5377,13 @@ async function handleGmSocket(data) {
       at: Date.now()
     });
     await applyProxyTargetsForUser(data.userId);
+    const targetUser = game.users?.get?.(String(data.userId ?? ""));
+    recordTargetDiagnostic("gm-received", {
+      sourceUserId: String(data.userId ?? ""),
+      sceneId: String(data.sceneId ?? ""),
+      requestedTargetIds: gmProxyTargets.get(String(data.userId)).targetIds,
+      appliedPlayerTargetIds: asArray(targetUser?.targets).map((token) => String(token.id ?? token.document?.id ?? ""))
+    });
     sendSocket("commandResult", {
       targetUserIds: [data.userId],
       message: `Targets ${gmProxyTargets.get(String(data.userId)).targetIds.length}`
@@ -5300,7 +5500,25 @@ async function handleGmSocket(data) {
     return;
   }
   if (data.type === "mapSnapshotPing") {
-    await handleMapSnapshotPing(data);
+    try {
+      await handleMapSnapshotPing(data);
+      if (data.placementRequestId) {
+        sendSocket("mapPlacementReady", {
+          targetUserIds: [data.userId],
+          placementRequestId: String(data.placementRequestId)
+        });
+      }
+    } catch (error) {
+      console.error("Player Pilot placement ping failed:", error);
+      if (data.placementRequestId) {
+        sendSocket("mapPlacementReady", {
+          targetUserIds: [data.userId],
+          placementRequestId: String(data.placementRequestId),
+          message: "The GM client could not receive that placement ping.",
+          failed: true
+        });
+      }
+    }
   }
 }
 
@@ -5352,14 +5570,22 @@ async function applyProxyTargetsForUser(userId) {
   const proxy = gmProxyTargets.get(String(userId));
   if (!proxy || Date.now() - proxy.at > 2 * 60 * 60 * 1000) return;
   const ids = proxy.targetIds ?? [];
-  game.playerPilot.model.applyTargetsForCurrentUser(ids, proxy.sceneId);
+  game.playerPilot.model.applyTargetsForCurrentUser(ids, proxy.sceneId, userId);
 }
 
 async function withProxyTargetsForUser(userId, fn) {
   const proxy = gmProxyTargets.get(String(userId));
   const shouldApply = proxy && Date.now() - proxy.at <= 2 * 60 * 60 * 1000;
   const previous = shouldApply ? targetIdsForCurrentUser() : [];
-  if (shouldApply) game.playerPilot.model.applyTargetsForCurrentUser(proxy.targetIds ?? [], proxy.sceneId);
+  if (shouldApply) {
+    game.playerPilot.model.applyTargetsForCurrentUser(proxy.targetIds ?? [], proxy.sceneId);
+    recordTargetDiagnostic("gm-workflow", {
+      sourceUserId: String(userId ?? ""),
+      sceneId: String(proxy.sceneId ?? ""),
+      requestedTargetIds: proxy.targetIds ?? [],
+      appliedGmTargetIds: targetIdsForCurrentUser()
+    });
+  }
   try {
     return await fn();
   } finally {
@@ -5410,7 +5636,7 @@ function actionNoticeTargets(data, item, actor) {
   if (names.length) return names;
   if (targetIds.length) return [`${targetIds.length} target${targetIds.length === 1 ? "" : "s"}`];
   const targetInfo = game.playerPilot.model.itemTargetInfo(item, data.options?.activityId);
-  if (targetInfo.selfOnly) return [`${actor.name} (Self)`];
+  if (targetInfo.selfOnly || targetInfo.implicitSelf) return [`${actor.name} (Self)`];
   return targetInfo.text ? [targetInfo.text] : [];
 }
 
@@ -5480,6 +5706,20 @@ function pruneGmDnd5eUses() {
 function dnd5eUsageMessage(result) {
   const candidates = [result?.message, result?.result?.message, result];
   return candidates.find((candidate) => candidate?.documentName === "ChatMessage" || candidate instanceof ChatMessage) ?? null;
+}
+
+export function recordDnd5eActivityDiagnostic(stage, details = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    stage: String(stage ?? "activity"),
+    ...details
+  };
+  const previous = Array.isArray(globalThis.playerPilotDnd5eActivityLog)
+    ? globalThis.playerPilotDnd5eActivityLog
+    : [];
+  globalThis.playerPilotDnd5eActivityLog = [...previous, entry].slice(-20);
+  console.info(`[Player Pilot][D&D5e ${entry.stage}]`, entry);
+  return entry;
 }
 
 function midiWorkflowForMessage(message) {
@@ -5857,10 +6097,22 @@ async function gmDnd5eAutoRoll(data) {
   const record = await waitForGmDnd5eUse(data);
   if (!record?.message) throw new Error("The matching D&D5e use card is not ready. Press USE again, then AUTO.");
   const workflow = record.workflow ?? midiWorkflowForMessage(record.message);
-  const activityId = String(data.activityId ?? record.activityId ?? "");
-  const activity = workflow?.activity
-    ?? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity;
+  const activityId = String(data.activityId || record.activityId || "");
+  const requestedActivity = activityId
+    ? game.playerPilot.model.getItemActivities(item).find((candidate) => (
+      String(candidate?.id ?? candidate?._id ?? "") === activityId
+    )) ?? game.playerPilot.model.selectedItemActivity(item, activityId)?.activity
+    : null;
+  const activity = requestedActivity ?? workflow?.activity
+    ?? game.playerPilot.model.selectedItemActivity(item, record.activityId)?.activity;
   if (!activity) throw new Error("The matching D&D5e activity was not found.");
+  const workflowActivityId = String(workflow?.activity?.id ?? workflow?.activity?._id ?? "");
+  const resolvedActivityId = String(activity?.id ?? activity?._id ?? "");
+  const rollWorkflow = workflow && (
+    !requestedActivity
+    || workflow.activity === activity
+    || (workflowActivityId && resolvedActivityId && workflowActivityId === resolvedActivityId)
+  ) ? workflow : null;
 
   let resolveCpr;
   const context = {
@@ -5868,7 +6120,7 @@ async function gmDnd5eAutoRoll(data) {
     actorUuid: actor.uuid,
     itemId: item.id,
     kind: data.rollKind,
-    workflow,
+    workflow: rollWorkflow,
     nativeRolls: [],
     cprClaimed: false,
     cprResolved: false,
@@ -5878,8 +6130,8 @@ async function gmDnd5eAutoRoll(data) {
   gmDnd5eAutoContexts.push(context);
   try {
     return await withProxyTargetsForUser(data.userId, () => (
-      workflow
-        ? runDnd5eWorkflowAutoRoll(activity, workflow, record.message, data, context)
+      rollWorkflow
+        ? runDnd5eWorkflowAutoRoll(activity, rollWorkflow, record.message, data, context)
         : runDnd5eCoreAutoRoll(activity, record.message, data, context)
     ));
   } finally {
@@ -5928,7 +6180,25 @@ async function gmUseItem(data) {
       }
     }
   });
-  const result = await withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, data.options ?? {}));
+  const itemUseOptions = {
+    ...(data.options ?? {}),
+    playerPilotSceneId: String(data.sceneId ?? ""),
+    playerPilotTargetIds: Array.isArray(data.targetIds) ? data.targetIds : []
+  };
+  const result = await withCprPilotPromptUser(actor, data.userId, () => (
+    withProxyTargetsForUser(data.userId, () => game.playerPilot.model.useItem(actor, item, itemUseOptions))
+  ));
+  if (game.system.id === "dnd5e" && game.playerPilot.model.usableItemActivities?.(item)?.length > 1) {
+    const message = dnd5eUsageMessage(result);
+    recordDnd5eActivityDiagnostic("result", {
+      item: item.name,
+      requestedActivityId: String(data.options?.activityId ?? ""),
+      requestedActivityName: String(data.options?.activityName ?? ""),
+      messageId: String(message?.id ?? ""),
+      messageActivity: message?.flags?.dnd5e?.activity ?? null,
+      messageTitle: String(message?.title ?? message?.flavor ?? "")
+    });
+  }
   rememberGmDnd5eUse(data, result);
   return result;
 }
@@ -5991,20 +6261,156 @@ function openPilotReactionPrompt(data = {}) {
   }, 250);
 }
 
+function openPilotCprButtonPrompt(data = {}) {
+  const choices = Array.isArray(data.choices)
+    ? data.choices.filter((choice) => String(choice?.value ?? "").length)
+    : [];
+  if (!choices.length) return;
+  const requestId = String(data.requestId ?? "");
+  const timeout = clamp(Number(data.timeout ?? 30), 10, 60);
+  const expiresAt = Number(data.expiresAt) > Date.now()
+    ? Number(data.expiresAt)
+    : Date.now() + (timeout * 1000);
+  let answered = false;
+  let timer = null;
+  const respond = (choice = "") => {
+    if (answered) return;
+    answered = true;
+    timer && window.clearInterval(timer);
+    sendSocket("cprButtonResponse", {
+      targetUserIds: [String(data.gmUserId ?? "")].filter(Boolean),
+      requestId,
+      choice: String(choice ?? "")
+    });
+    closeModal();
+  };
+
+  hideWaitingDiceOverlay();
+  openModal(`
+    <div class="pp-cpr-choice-heading">
+      <i class="fas fa-hand-fist"></i>
+      <div><small>PLAYER PILOT</small><h2>${escapeHtml(data.title ?? "Choose")}</h2></div>
+      <strong data-cpr-choice-countdown>${Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))}s</strong>
+    </div>
+    <p class="pp-cpr-choice-prompt">${escapeHtml(data.prompt ?? "Choose how to continue.")}</p>
+    <div class="pp-cpr-choice-list">
+      ${choices.map((choice) => `
+        <button class="pp-cpr-choice" type="button" data-modal-action="cprChoice" data-choice="${escapeHtml(choice.value)}">
+          ${choice.image ? `<img src="${escapeHtml(choice.image)}" alt="">` : `<i class="fas fa-dice-d20"></i>`}
+          <span>${escapeHtml(choice.label || choice.value)}</span>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `).join("")}
+    </div>
+    <div class="pp-dialog-actions">
+      <button class="pp-button" type="button" data-modal-action="cprCancel"><i class="fas fa-xmark"></i> Cancel</button>
+    </div>
+  `, {
+    cprChoice: async (_modal, button) => respond(button?.dataset?.choice ?? ""),
+    cprCancel: async () => respond("")
+  }, {
+    closeOnOutsideClick: false,
+    onCloseModal: () => {
+      timer && window.clearInterval(timer);
+      if (!answered) {
+        answered = true;
+        sendSocket("cprButtonResponse", {
+          targetUserIds: [String(data.gmUserId ?? "")].filter(Boolean),
+          requestId,
+          choice: ""
+        });
+      }
+    }
+  });
+  state.modal.classList.add("pp-cpr-choice-modal");
+  state.modal.dataset.cprPromptRequestId = requestId;
+  timer = window.setInterval(() => {
+    if (state.modal?.dataset?.cprPromptRequestId !== requestId) {
+      window.clearInterval(timer);
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    const counter = state.modal.querySelector("[data-cpr-choice-countdown]");
+    if (counter) counter.textContent = `${remaining}s`;
+    if (remaining <= 0) respond("");
+  }, 250);
+}
+
+function localizedCprPromptText(value, fallback = "") {
+  const source = String(value ?? "").trim();
+  if (!source) return fallback;
+  const localized = game.i18n?.localize?.(source) ?? source;
+  return cleanRulesText(localized) || fallback || source;
+}
+
+function requestPilotCprButtonChoice(title, content, buttons, userId) {
+  const targetUserId = String(userId ?? "");
+  const requestId = foundry.utils.randomID();
+  const timeout = 30;
+  const expiresAt = Date.now() + (timeout * 1000);
+  const choices = asArray(buttons).map(([label, value, options = {}]) => ({
+    label: localizedCprPromptText(label, String(label ?? value ?? "Choose")),
+    value: String(value ?? ""),
+    image: String(options?.image ?? "")
+  })).filter((choice) => choice.value);
+  if (!targetUserId || !choices.length) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const finish = (choice = "") => {
+      const pending = pendingGmCprButtonPrompts.get(requestId);
+      if (!pending) return;
+      pendingGmCprButtonPrompts.delete(requestId);
+      window.clearTimeout(pending.timer);
+      resolve(String(choice ?? "") || false);
+    };
+    const timer = window.setTimeout(() => finish(""), timeout * 1000);
+    pendingGmCprButtonPrompts.set(requestId, { userId: targetUserId, resolve: finish, timer });
+    const sent = sendSocket("cprButtonPrompt", {
+      targetUserIds: [targetUserId],
+      gmUserId: String(game.user?.id ?? ""),
+      requestId,
+      title: localizedCprPromptText(title, "Grapple"),
+      prompt: localizedCprPromptText(content, "Choose how to contest the grapple."),
+      choices,
+      timeout,
+      expiresAt
+    });
+    if (!sent) finish("");
+  });
+}
+
 function installCprPilotPromptBridge() {
   const dialogUtils = globalThis.chrisPremades?.utils?.dialogUtils;
   if (!game.modules.get("chris-premades")?.active || typeof dialogUtils?.confirmUseItem !== "function") return false;
-  if (dialogUtils.confirmUseItem.playerPilotBridge === true) return true;
-  const original = dialogUtils.confirmUseItem;
-  const bridge = function (item, options = {}) {
-    const actorId = String(item?.actor?.id ?? item?.parent?.id ?? "");
-    const contexts = cprPromptUsersByActor.get(actorId) ?? [];
-    const userId = contexts.at(-1)?.userId;
-    return original.call(this, item, userId ? { ...options, userId } : options);
-  };
-  bridge.playerPilotBridge = true;
-  dialogUtils.confirmUseItem = bridge;
-  return true;
+  if (dialogUtils.confirmUseItem.playerPilotBridge !== true) {
+    const originalConfirmUseItem = dialogUtils.confirmUseItem;
+    const confirmUseItemBridge = function (item, options = {}) {
+      const actorId = String(item?.actor?.id ?? item?.parent?.id ?? "");
+      const contexts = cprPromptUsersByActor.get(actorId) ?? [];
+      const userId = contexts.at(-1)?.userId;
+      return originalConfirmUseItem.call(this, item, userId ? { ...options, userId } : options);
+    };
+    confirmUseItemBridge.playerPilotBridge = true;
+    dialogUtils.confirmUseItem = confirmUseItemBridge;
+  }
+  if (typeof dialogUtils.buttonDialog === "function" && dialogUtils.buttonDialog.playerPilotBridge !== true) {
+    const originalButtonDialog = dialogUtils.buttonDialog;
+    const buttonDialogBridge = function (title, content, buttons, options = {}) {
+      const targetUserId = String(options?.userId ?? game.user?.id ?? "");
+      const isPilot = userIdsForPilots().includes(targetUserId);
+      const isRemoteGrappleChoice = game.user?.isGM
+        && targetUserId !== String(game.user?.id ?? "")
+        && isPilot
+        && /Grapple\.ChooseSkill\b|contest the grapple/i.test(`${content ?? ""} ${localizedCprPromptText(content)}`);
+      if (isRemoteGrappleChoice) {
+        return requestPilotCprButtonChoice(title, content, buttons, targetUserId);
+      }
+      return originalButtonDialog.call(this, title, content, buttons, options);
+    };
+    buttonDialogBridge.playerPilotBridge = true;
+    dialogUtils.buttonDialog = buttonDialogBridge;
+  }
+  return dialogUtils.confirmUseItem.playerPilotBridge === true;
 }
 
 async function withCprPilotPromptUser(actor, userId, fn) {
@@ -7364,6 +7770,14 @@ function pilotPromptSignal(app, root) {
     root.querySelector(".window-title")?.textContent
   ].map((value) => String(value ?? "")).join(" ");
   if (/UserConfig|UserConfiguration|player-pilot-access/i.test(identity)) return false;
+  // CPR's AppV2 DialogApp can fire its render hook before the footer part has
+  // been attached. Its class/id are authoritative dialog signals, so surface
+  // it immediately instead of requiring buttons that arrive later.
+  if (/\bDialogApp\b|dialog-app-window/i.test(identity)) return true;
+  // CPR assigns the outer ApplicationV2 a generated id such as app-113. Its
+  // remote choices live inside #dialog-app/.cpr-dialog and its footer can be
+  // completely empty, so the content host is the reliable DOM signature.
+  if (root.querySelector("#dialog-app.cpr-dialog, .cpr-dialog")) return true;
   const footer = root.querySelector("footer.form-footer, [data-application-part='footer'], .dialog-buttons");
   const buttons = footer?.querySelectorAll?.("button, [type='submit']") ?? [];
   if (!footer || buttons.length < 1) return false;
@@ -7381,19 +7795,36 @@ function syncPilotPromptBackdrop() {
   document.body?.classList?.toggle?.("player-pilot-native-prompt-open", open);
 }
 
+function movePilotPromptOutOfHiddenInterface(root) {
+  const hiddenInterface = root?.closest?.("#interface");
+  if (hiddenInterface && globalThis.getComputedStyle?.(hiddenInterface)?.display === "none") {
+    document.body.appendChild(root);
+  }
+}
+
 function surfacePilotPrompt(app, html = null) {
   if (!userIsPilot()) return;
   const root = applicationRoot(app, html);
   if (!pilotPromptSignal(app, root)) return;
+  hideWaitingDiceOverlay();
   root.classList.add("pp-native-prompt");
   root.setAttribute("aria-modal", "true");
   root.dataset.ppNativePrompt = "1";
   decorateDnd5eNativePromptResources(app, root);
-  syncPilotPromptBackdrop();
-  window.requestAnimationFrame(() => {
+  const ensurePromptIsVisible = () => {
     if (!root.isConnected) return;
+    movePilotPromptOutOfHiddenInterface(root);
+    syncPilotPromptBackdrop();
+  };
+  ensurePromptIsVisible();
+  window.requestAnimationFrame(() => {
+    ensurePromptIsVisible();
     root.querySelector("button[autofocus], footer button, [data-application-part='footer'] button")?.focus?.({ preventScroll: true });
   });
+  // CPR's remote DialogApp may be rendered before Foundry attaches it to #interface.
+  // Recheck briefly so the prompt is moved out if that interface is hidden for pilots.
+  window.setTimeout(ensurePromptIsVisible, 100);
+  window.setTimeout(ensurePromptIsVisible, 500);
 }
 
 function decorateDnd5eNativePromptResources(app, root) {
@@ -7433,19 +7864,23 @@ function decorateDnd5eNativePromptResources(app, root) {
 
 function installPilotPromptObserver() {
   if (!userIsPilot() || state.nativePromptObserver || !document.body) return;
+  const promptHostSelector = ".application, .window-app, #dialog-app-window";
   const inspect = (node) => {
     if (!(node instanceof HTMLElement)) return;
-    if (node.matches(".application, .window-app")) surfacePilotPrompt(null, node);
-    node.querySelectorAll?.(".application, .window-app").forEach((element) => surfacePilotPrompt(null, element));
+    const host = node.matches(promptHostSelector) ? node : node.closest(promptHostSelector);
+    if (host) surfacePilotPrompt(null, host);
+    node.querySelectorAll?.(promptHostSelector).forEach((element) => surfacePilotPrompt(null, element));
   };
-  document.querySelectorAll(".application, .window-app").forEach((element) => surfacePilotPrompt(null, element));
+  document.querySelectorAll(promptHostSelector).forEach((element) => surfacePilotPrompt(null, element));
   state.nativePromptObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       mutation.addedNodes.forEach(inspect);
     }
     window.queueMicrotask(syncPilotPromptBackdrop);
   });
-  state.nativePromptObserver.observe(document.body, { childList: true });
+  // AppV2 dialogs such as CPR's DialogApp are commonly added below #interface
+  // or assembled one part at a time rather than appended directly to body.
+  state.nativePromptObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function createSystemModel() {

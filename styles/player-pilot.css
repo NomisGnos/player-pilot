@@ -30,7 +30,7 @@ body.player-pilot-active.player-pilot-native-prompt-open::before {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: 2147483090;
+  z-index: 2147483646;
   pointer-events: none;
   background: rgba(0, 0, 0, 0.76);
   backdrop-filter: blur(2px);
@@ -42,7 +42,7 @@ body.player-pilot-active .window-app.pp-native-prompt {
   inset: auto !important;
   top: 50% !important;
   left: 50% !important;
-  z-index: 2147483100 !important;
+  z-index: 2147483647 !important;
   display: flex !important;
   flex-direction: column;
   width: min(520px, calc(100vw - 24px)) !important;
@@ -60,6 +60,18 @@ body.player-pilot-active .window-app.pp-native-prompt {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68) !important;
   transform: translate(-50%, -50%) !important;
   font-family: "Signika", system-ui, sans-serif !important;
+}
+
+/* CPR creates this AppV2 form incrementally. Keep it visible at the top layer
+   even during the brief frame before the prompt observer decorates it. */
+body.player-pilot-active #dialog-app-window {
+  z-index: 2147483647 !important;
+}
+
+/* Current CPR releases give DialogApp a generated outer id (for example
+   app-113), while #dialog-app is the stable child signature. */
+body.player-pilot-active .application:has(#dialog-app.cpr-dialog) {
+  z-index: 2147483647 !important;
 }
 
 body.player-pilot-active .pp-native-prompt > .window-header {
@@ -158,6 +170,73 @@ body.player-pilot-active .pp-native-prompt [data-application-part="footer"] butt
   color: #d9e1e6 !important;
   background: #263139 !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog {
+  display: grid !important;
+  gap: 12px;
+  width: 100%;
+  padding: 18px !important;
+  color: var(--pp-text) !important;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog .content {
+  margin: 0 0 4px !important;
+  color: var(--pp-soft) !important;
+  font-size: 0.96rem !important;
+  line-height: 1.45;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog .form-group,
+body.player-pilot-active .pp-native-prompt .cpr-dialog .flex-col {
+  display: grid !important;
+  gap: 8px;
+  width: 100%;
+  margin: 0 !important;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog button.form-button {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100% !important;
+  min-height: 48px !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  color: #06231f !important;
+  background: linear-gradient(180deg, #8be0cf, var(--pp-accent)) !important;
+  border: 1px solid #9ef1df !important;
+  border-radius: 6px !important;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.3);
+  font-weight: 900 !important;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog button.form-button:hover,
+body.player-pilot-active .pp-native-prompt .cpr-dialog button.form-button:focus-visible {
+  filter: brightness(1.08);
+  outline: 2px solid rgba(158, 241, 223, 0.75);
+  outline-offset: 2px;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog .button-text {
+  width: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: inherit !important;
+  font-size: 1rem !important;
+  font-weight: 900;
+}
+
+body.player-pilot-active .pp-native-prompt .cpr-dialog .button-image {
+  flex: 0 0 42px;
+  width: 42px !important;
+  height: 42px !important;
+  margin: 0 !important;
+  border: 1px solid rgba(6, 35, 31, 0.28) !important;
+  border-radius: 5px !important;
+  object-fit: cover;
 }
 
 @media (max-width: 430px) {
@@ -2643,6 +2722,40 @@ button.pp-card-img.pp-card-info-btn {
   min-width: 88px;
 }
 
+.pp-target-row-actions {
+  display: grid;
+  grid-template-columns: auto minmax(88px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.pp-target-row-actions .pp-target-locate,
+.pp-target-row-actions .pp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pp-modal-targets .pp-token-row.target-out-of-range .pp-card-img {
+  opacity: 0.58;
+  filter: grayscale(0.9) brightness(0.72);
+}
+
+.pp-modal-targets .pp-token-row.target-out-of-range .pp-card-main {
+  opacity: 0.58;
+  filter: grayscale(0.72);
+}
+
+.pp-modal-targets .pp-token-row.target-out-of-range .pp-card-title {
+  color: var(--pp-muted);
+}
+
+.pp-modal-targets .pp-target-locate {
+  min-width: 0;
+  padding-inline: 10px;
+}
+
 .pp-modal-targets .pp-card-title {
   font-size: 1rem;
 }
@@ -2662,6 +2775,10 @@ button.pp-card-img.pp-card-info-btn {
 
   .pp-modal-targets .pp-action-btn {
     width: auto;
+  }
+
+  .pp-target-row-actions {
+    grid-template-columns: minmax(88px, 1fr);
   }
 }
 
@@ -5786,6 +5903,111 @@ body.player-pilot-active #notifications > .notification.error {
   color: var(--pp-accent);
 }
 
+.pp-cpr-choice-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: linear-gradient(90deg, rgba(98, 199, 178, 0.16), rgba(214, 163, 79, 0.08));
+  border: 1px solid rgba(98, 199, 178, 0.32);
+  border-radius: 8px;
+}
+
+.pp-modal.pp-cpr-choice-modal {
+  z-index: 2147483647;
+}
+
+.pp-cpr-choice-heading > i {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: #06231f;
+  background: var(--pp-accent);
+  border-radius: 7px;
+  font-size: 1.2rem;
+}
+
+.pp-cpr-choice-heading small,
+.pp-cpr-choice-heading h2 {
+  display: block;
+  margin: 0;
+}
+
+.pp-cpr-choice-heading small {
+  color: var(--pp-accent);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.pp-cpr-choice-heading > strong {
+  min-width: 48px;
+  padding: 7px 8px;
+  color: #f4c66d;
+  background: rgba(214, 163, 79, 0.12);
+  border: 1px solid rgba(214, 163, 79, 0.36);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.pp-cpr-choice-prompt {
+  margin: 0;
+  padding: 4px 2px;
+  color: var(--pp-soft);
+  text-align: center;
+}
+
+.pp-cpr-choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pp-cpr-choice {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 6px 11px 6px 6px;
+  color: var(--pp-text);
+  background: #17232c;
+  border: 1px solid rgba(98, 199, 178, 0.4);
+  border-radius: 7px;
+  font-size: 1rem;
+  font-weight: 900;
+  text-align: left;
+}
+
+.pp-cpr-choice:hover,
+.pp-cpr-choice:focus-visible {
+  color: #06231f;
+  background: var(--pp-accent);
+  border-color: #9ef1df;
+  outline: none;
+}
+
+.pp-cpr-choice > i:first-child,
+.pp-cpr-choice > img {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  color: var(--pp-accent);
+  background: rgba(98, 199, 178, 0.1);
+  border: 1px solid rgba(98, 199, 178, 0.3);
+  border-radius: 6px;
+}
+
+.pp-cpr-choice:hover > i,
+.pp-cpr-choice:focus-visible > i {
+  color: #06231f;
+}
+
 .chat-message .pp-reaction-chat-card {
   display: grid;
   gap: 9px;
@@ -6541,7 +6763,8 @@ body.player-pilot-active .pp-native-prompt .pp-reaction-resource-context {
 }
 
 .pp-dice-wait {
-  display: flex;
+  display: grid;
+  justify-items: center;
   align-items: center;
   gap: 8px;
   min-height: 36px;
@@ -6549,13 +6772,38 @@ body.player-pilot-active .pp-native-prompt .pp-reaction-resource-context {
   color: #f4fbff;
   background: rgba(5, 13, 19, 0.82);
   border: 1px solid color-mix(in srgb, var(--pp-dice-color) 62%, white);
-  border-radius: 999px;
+  border-radius: 10px;
   font-weight: 900;
   letter-spacing: 0.04em;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
 }
 
-.pp-dice-wait b {
+.pp-dice-wait-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pp-dice-wait-dismiss {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 11px;
+  color: #f4fbff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.pp-dice-wait-dismiss:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.pp-dice-wait-status b {
   display: inline-flex;
   width: 3ch;
   margin-left: -5px;
@@ -6566,9 +6814,9 @@ body.player-pilot-active .pp-native-prompt .pp-reaction-resource-context {
   white-space: nowrap;
 }
 
-.pp-dice-wait b i { font-style: normal; }
-.pp-dice-wait b i:nth-child(2) { animation: pp-dice-wait-dot-two 1.2s steps(1, end) infinite; }
-.pp-dice-wait b i:nth-child(3) { animation: pp-dice-wait-dot-three 1.2s steps(1, end) infinite; }
+.pp-dice-wait-status b i { font-style: normal; }
+.pp-dice-wait-status b i:nth-child(2) { animation: pp-dice-wait-dot-two 1.2s steps(1, end) infinite; }
+.pp-dice-wait-status b i:nth-child(3) { animation: pp-dice-wait-dot-three 1.2s steps(1, end) infinite; }
 
 .pp-dice-results {
   display: flex;

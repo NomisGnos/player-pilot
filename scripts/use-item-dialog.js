@@ -21,6 +21,9 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       modalToggleTarget: function (_event, button) {
         return this.toggleTarget(button);
       },
+      pingModalTarget: function (_event, button) {
+        return this.services.pingTargetToken(button?.dataset?.tokenId ?? "");
+      },
       nextTargetStep: function () {
         return this.nextTargetStep();
       },
@@ -49,8 +52,16 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
         );
       },
       goToPing: function () {
+        const options = this.lastUseOptions ?? this.readUseOptions();
+        const showReminder = this.hasFollowupRolls(this.lastUseInstructions ?? this.collectInstructions(options));
         this.close();
-        this.services.openPingOnMap();
+        this.services.openPingOnMap({
+          actorId: this.actor.id,
+          itemId: this.item.id,
+          itemName: this.item.name,
+          options,
+          showReminder
+        });
       }
     }
   };
@@ -93,7 +104,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
     this.targetsResetForUse = false;
     if (!this.activityStep && this.targetStep) this.resetTargetsForUse();
-    this.spellStep = item.type === "spell" && (!model.usesSpellRanks || this.slots.length > 0);
+    this.spellStep = this.activityUsesSpellSlot(this.defaultActivityId)
+      && (!model.usesSpellRanks || this.slots.length > 0);
   }
 
   get root() {
@@ -119,6 +131,11 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     return this.model.itemTargetInfo(this.item, activityId);
   }
 
+  activityUsesSpellSlot(activityId = "") {
+    if (this.item.type !== "spell") return false;
+    return this.model.itemActivityUsesSpellSlot?.(this.item, activityId) !== false;
+  }
+
   resetTargetsForUse() {
     if (this.targetsResetForUse) return;
     this.targetsResetForUse = true;
@@ -127,6 +144,10 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
 
   rangeFeetFor(activityId = "") {
     return this.model.getItemRangeFeet?.(this.item, activityId);
+  }
+
+  sourceTokenIdFor(activityId = "") {
+    return this.model.itemActivitySourceTokenId?.(this.item, activityId) ?? "";
   }
 
   staticCastLabel() {
@@ -161,7 +182,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       targetPickerHtml: this.services.renderModalTargetPicker({
         ...this.normalized,
         targetInfo: this.targetInfo,
-        rangeFeet: this.rangeFeetFor(this.defaultActivityId)
+        rangeFeet: this.rangeFeetFor(this.defaultActivityId),
+        sourceTokenId: this.sourceTokenIdFor(this.defaultActivityId)
       }, "data-action"),
       spellStep: this.spellStep,
       concentration: this.concentration,
@@ -215,12 +237,15 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       && this.root.querySelector("[name='useSneakAttack']")?.checked === true;
     const activityId = this.root.querySelector("[name='activityId']")?.value ?? this.defaultActivityId;
     const activity = this.activities.find((entry) => entry.id === activityId);
+    const castLevel = this.activityUsesSpellSlot(activityId)
+      ? (this.root.querySelector("[name='castLevel']")?.value ?? this.defaultCastLevel ?? "")
+      : this.baseCastLevel;
     return {
       activityId,
       activityName: activity?.name ?? "",
       playerChoice: this.root.querySelector("[name='playerChoice']")?.value ?? "",
       playerChoiceLabel: this.playerChoice?.label ?? "",
-      castLevel: this.root.querySelector("[name='castLevel']")?.value ?? this.defaultCastLevel ?? "",
+      castLevel,
       ammoItemId: this.root.querySelector("[name='ammoItemId']")?.value ?? "",
       sneakAttackFormula: useSneakAttack ? this.sneakAttack.formula : "",
       replaceConcentrationEffectId: this.activeConcentration?.id ?? ""
@@ -261,8 +286,11 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
 
   async finishUseFlow(options, currentInstructions) {
     this.lastUseOptions = options;
-    this.useRequestId = await this.services.useItem(this.item.id, options, { showReminder: false });
+    this.lastUseInstructions = currentInstructions;
     const placementNeeded = this.services.itemRequiresMapPlacement(this.item, options.activityId);
+    if (!placementNeeded) {
+      this.useRequestId = await this.services.useItem(this.item.id, options, { showReminder: false });
+    }
     if (!this.hasFollowupRolls(currentInstructions) && !placementNeeded) {
       await this.close();
       return;
@@ -272,15 +300,15 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     this.root.querySelector("[data-use-step='rolls']")?.classList.remove("hidden");
     const title = this.root.querySelector("[data-rolls-heading-title]");
     const detail = this.root.querySelector("[data-rolls-heading-detail]");
-    if (title && placementNeeded && !this.hasFollowupRolls(currentInstructions)) {
-      title.textContent = "Placement Needed";
-    }
+    if (title && placementNeeded) title.textContent = "Choose Placement First";
     if (detail && placementNeeded) {
       detail.textContent = this.hasFollowupRolls(currentInstructions)
-        ? "After resolving the rolls below, ping the map so the GM knows where to place the effect."
-        : "Ping the map so the GM knows where to place the effect.";
+        ? "Ping the map first. Player Pilot will then start the action and show its remaining roll controls."
+        : "Ping the map first. Player Pilot will start the action after the GM receives your chosen point.";
     }
     this.root.querySelector("[data-placement-prompt]")?.classList.toggle("hidden", !placementNeeded);
+    this.root.querySelector("[data-roll-instructions]")?.classList.toggle("hidden", placementNeeded);
+    this.root.querySelector("[data-sneak-attack-control]")?.classList.toggle("hidden", placementNeeded);
     this.root.querySelectorAll(".pp-dialog-actions [data-action]:not([data-action='close'])")
       .forEach((button) => button.classList.add("hidden"));
     const finalButton = this.root.querySelector("[data-final-done]");
@@ -295,6 +323,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     const { options } = this.refreshRollInstructions();
     this.targetInfo = this.targetInfoFor(options.activityId);
     this.targetStep = this.targetInfo.needsTarget || this.targetInfo.canTarget;
+    this.spellStep = this.activityUsesSpellSlot(options.activityId)
+      && (!this.model.usesSpellRanks || this.slots.length > 0);
     if (this.targetStep) this.resetTargetsForUse();
     this.root.querySelector("[data-use-step='activity']")?.classList.add("hidden");
     this.root.querySelector("[data-action='nextActivityStep']")?.classList.add("hidden");
@@ -306,7 +336,8 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
       picker.innerHTML = this.services.renderModalTargetPicker({
         ...this.normalized,
         targetInfo: this.targetInfo,
-        rangeFeet: this.rangeFeetFor(options.activityId)
+        rangeFeet: this.rangeFeetFor(options.activityId),
+        sourceTokenId: this.sourceTokenIdFor(options.activityId)
       }, "data-action");
     }
 
@@ -343,17 +374,26 @@ export class UseItemDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     this.services.setSelectedTargetSet(sceneId, selected);
-    this.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+    try {
+      this.model.applyTargetsForCurrentUser(Array.from(selected), sceneId);
+    } catch (error) {
+      console.warn("Player Pilot could not paint the local Foundry target marker.", error);
+    }
     for (const targetButton of this.root.querySelectorAll("[data-action='modalToggleTarget'][data-token-id]")) {
       const selectedNow = selected.has(String(targetButton.dataset.tokenId ?? ""));
       targetButton.closest(".pp-token-row")?.classList.toggle("selected", selectedNow);
       targetButton.classList.toggle("primary", selectedNow);
-      targetButton.textContent = selectedNow ? "Targeted" : "Target";
+      const label = targetButton.querySelector("span");
+      if (label) label.textContent = selectedNow ? "Targeted" : "Target";
     }
     this.services.updateModalTargetCount(selected.size, this.targetInfo);
     this.refreshSneakAttackChoice(
       this.root.querySelector("[name='activityId']")?.value ?? this.defaultActivityId
     );
+    this.services.recordTargetDiagnostic?.("player-select", {
+      sceneId,
+      targetIds: Array.from(selected)
+    });
     this.services.sendSocket("targetUpdate", {
       actorId: this.services.actorId(),
       sceneId,

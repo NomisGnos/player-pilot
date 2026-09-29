@@ -474,11 +474,20 @@ export class BaseModel {
     aria-label="${item.equipped ? "Unequip" : "Equip"} ${escapeHtml(item.name)}"><span class="pp-switch-knob"></span></button>`;
   }
 
-  applyTargetsForCurrentUser(targetIds = [], sceneId = "") {
-    const ids = Array.from(new Set((targetIds ?? []).map(String).filter(Boolean))).map(id => foundry.utils.parseUuid(id).id);
+  applyTargetsForCurrentUser(targetIds = [], sceneId = "", userId = "") {
+    const ids = Array.from(new Set((targetIds ?? []).map(String).filter(Boolean))).map((id) => {
+      try {
+        return foundry.utils.parseUuid?.(id)?.id ?? id;
+      } catch (_err) {
+        return id;
+      }
+    });
+    const targetUser = userId
+      ? (game.users?.get?.(String(userId)) ?? game.user)
+      : game.user;
     let applied = false;
     try {
-      if (canvas?.ready && typeof game.user?.updateTokenTargets === "function") {
+      if (canvas?.ready && targetUser === game.user && typeof game.user?.updateTokenTargets === "function") {
         game.user.updateTokenTargets(ids);
         applied = true;
       }
@@ -490,6 +499,7 @@ export class BaseModel {
         const selected = new Set(ids);
         for (const token of canvas.tokens.placeables) {
           token.setTarget?.(selected.has(token.id), {
+            user: targetUser,
             releaseOthers: false
           });
         }
@@ -500,7 +510,7 @@ export class BaseModel {
     }
     try {
       const sid = String(sceneId || canvas?.scene?.id || game.scenes?.viewed?.id || "").trim();
-      game.user?.broadcastActivity?.({
+      targetUser?.broadcastActivity?.({
         targets: ids,
         scene: sid || undefined,
         sceneId: sid || undefined

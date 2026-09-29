@@ -6,6 +6,7 @@ import {
   attackRollMode,
   executePlayerFirst,
   queueRender,
+  recordDnd5eActivityDiagnostic,
   renderInterfaceIcon,
   setting
 } from "./player-pilot.js";
@@ -400,14 +401,18 @@ export class DnD5eModel extends BaseModel {
     const selected = activityId ? this.selectedItemActivity(item, activityId)?.activity : null;
     const activities = this.getItemActivities(item);
     const candidates = selected
-      ? [selected.system, item.system]
+      ? [selected.system, ...(activities.length > 1 ? [] : [item.system])]
       : [item.system, ...activities.map(this.activitySystem)];
+    const selectedActivityType = String(this.activitySystem(selected)?.type ?? selected?.type ?? "").toLowerCase();
 
     targetInfo.count = 0;
     targetInfo.countSource = "";
     targetInfo.type = "";
     targetInfo.selfOnly = false;
     targetInfo.hasAreaTemplate = false;
+    targetInfo.canTarget = false;
+    targetInfo.implicitSelf = false;
+    targetInfo.disposition = "";
 
     for (const source of candidates) {
       const target = source?.target ?? {};
@@ -423,7 +428,9 @@ export class DnD5eModel extends BaseModel {
       if (lowered.includes("self")) targetInfo.selfOnly = true;
       if (fieldText(target.template?.type, target.area?.type)) targetInfo.hasAreaTemplate = true;
     }
-    const isWeaponAttack = item.type === "weapon" || this.getItemActivities(item).some((activity) => String(this.activitySystem(activity)?.type ?? activity?.type ?? "").toLowerCase() === "attack");
+    const isWeaponAttack = item.type === "weapon" || (selected
+      ? selectedActivityType === "attack"
+      : activities.some((activity) => String(this.activitySystem(activity)?.type ?? activity?.type ?? "").toLowerCase() === "attack"));
     if (isWeaponAttack && targetInfo.count <= 0) {
       targetInfo.count = 1;
       targetInfo.countSource = "weapon";
@@ -467,6 +474,29 @@ export class DnD5eModel extends BaseModel {
     );
 
     targetInfo.needsTarget = !targetInfo.selfOnly && (isWeaponAttack || targetInfo.statedCount > 0 || /(creature|enemy|ally|allies|enemies|object|objects|token)/i.test(targetInfo.type));
+    const selectedActivityIsAuthoritative = !!selected && (activities.length > 1 || !!selectedActivityType);
+    const inferredUtilitySelf = item.type !== "spell"
+      && selectedActivityIsAuthoritative
+      && selectedActivityType === "utility"
+      && !targetInfo.type
+      && !targetInfo.hasAreaTemplate
+      && !targetInfo.needsTarget;
+    const inferredSpellPlacement = item.type === "spell"
+      && !!selected
+      && selectedActivityType !== "attack"
+      && (
+        /\b(?:point|space|location|spot)\b.{0,90}\b(?:choose|chosen|you can see|within range|unoccupied)\b/i.test(description)
+        || /\b(?:choose|chosen|you can see|within range|unoccupied)\b.{0,90}\b(?:point|space|location|spot)\b/i.test(description)
+      );
+    targetInfo.implicitSelf = targetInfo.selfOnly || inferredUtilitySelf;
+    targetInfo.canTarget = targetInfo.needsTarget || (
+      !targetInfo.implicitSelf
+      && !targetInfo.hasAreaTemplate
+      && !inferredSpellPlacement
+    );
+    const hostileType = /(enemy|hostile)/i.test(targetInfo.type);
+    const friendlyType = /(ally|allies|friendly|willing)/i.test(targetInfo.type);
+    if (hostileType !== friendlyType) targetInfo.disposition = hostileType ? "hostile" : "friendly";
     targetInfo.text = targetInfo.limitKnown && targetInfo.count > 0 && targetInfo.type ? `${targetInfo.count} ${targetInfo.type}` : capitalizeWords(targetInfo.type);
     targetInfo.limitReason = targetCountScales ? "Target count changes with cast level." : "";
 
@@ -580,6 +610,33 @@ export class DnD5eModel extends BaseModel {
     return 0;
   }
 
+  isSpiritualWeaponAttack(item, activityId = "") {
+    const selected = this.selectedItemActivity(item, activityId);
+    if (!selected) return false;
+    const data = this.activitySystem(selected.activity);
+    const identifier = String(data.identifier ?? selected.activity?.identifier ?? "").toLowerCase();
+    const itemIdentifier = String(item?.flags?.["chris-premades"]?.info?.identifier ?? "").toLowerCase();
+    const name = String(selected.name ?? "").toLowerCase();
+    return identifier === "spiritualweaponattack"
+      || (itemIdentifier === "spiritualweapon" && selected.type === "attack")
+      || (name.includes("spiritual weapon") && name.includes("attack") && selected.type === "attack");
+  }
+
+  itemActivitySourceTokenId(item, activityId = "") {
+    if (!this.isSpiritualWeaponAttack(item, activityId)) return "";
+    const actor = item?.actor ?? this.actor;
+    const effects = asArray(actor?.effects);
+    const effect = effects.find((entry) => {
+      const identifier = String(entry?.flags?.["chris-premades"]?.info?.identifier ?? "").toLowerCase();
+      return identifier === "spiritualweapon";
+    });
+    const summonIds = effect?.flags?.["chris-premades"]?.summons?.ids;
+    if (!summonIds || typeof summonIds !== "object") return "";
+    const namedIds = asArray(summonIds[effect.name]).filter(Boolean);
+    const fallbackIds = Object.values(summonIds).flatMap((value) => asArray(value)).filter(Boolean);
+    return String(namedIds[0] ?? fallbackIds[0] ?? "");
+  }
+
   itemRangeLabel(item) {
     const sources = [item?.system, ...this.getItemActivities(item).map(this.activitySystem)];
     for (const source of sources) {
@@ -687,38 +744,91 @@ export class DnD5eModel extends BaseModel {
     if (typeof item?.use === "function") {
       const useOptions = { legacy: false, subsequentActions: false };
       if (game.modules.get("midi-qol")?.active) {
+        const scene = game.scenes?.get?.(String(options.playerPilotSceneId ?? ""))
+          ?? game.scenes?.viewed
+          ?? canvas?.scene;
+        const preSelectedTargetUuids = asArray(options.playerPilotTargetIds)
+          .map((targetId) => {
+            const id = String(targetId ?? "");
+            const token = scene?.tokens?.get?.(id)
+              ?? asArray(scene?.tokens).find((entry) => String(entry?.id ?? "") === id);
+            return String(token?.uuid ?? (id.includes(".") ? id : ""));
+          })
+          .filter(Boolean);
         useOptions.midiOptions = {
           workflowOptions: {
             autoRollAttack: false,
-            autoRollDamage: "none"
+            autoRollDamage: "none",
+            ...(preSelectedTargetUuids.length ? { preSelectedTargetUuids } : {})
           }
         };
       }
+      const selected = this.selectedItemActivity(item, options.activityId);
+      const activitySourceTokenId = this.itemActivitySourceTokenId(item, options.activityId);
+      const followupSpellActivity = item.type === "spell" && this.itemActivityUsesSpellSlot(item, options.activityId) === false;
       const level = Number.parseInt(options.castLevel, 10);
-      if (item.type === "spell" && Number.isFinite(level) && level > 0) {
+      if (item.type === "spell" && !followupSpellActivity && Number.isFinite(level) && level > 0) {
         this.queuePendingCastLevel(item.name, level);
         useOptions.level = level;
         useOptions.spellLevel = level;
         useOptions.slotLevel = level;
         useOptions.castLevel = level;
       }
-      const scaling = item.type === "spell" ? this.dndSpellScalingIncrease(actor, item, Number.isFinite(level) ? level : options.castLevel) : 0;
+      const scaling = item.type === "spell" && !followupSpellActivity
+        ? this.dndSpellScalingIncrease(actor, item, Number.isFinite(level) ? level : options.castLevel)
+        : 0;
       if (scaling > 0) useOptions.scaling = scaling;
       if (options.ammoItemId) {
         useOptions.ammunition = options.ammoItemId;
         useOptions.ammo = options.ammoItemId;
       }
-      if (options.replaceConcentrationEffectId) {
+      if (!followupSpellActivity && options.replaceConcentrationEffectId) {
         await this.endActorConcentration(options.replaceConcentrationEffectId);
         useOptions.concentration = {
           begin: true,
           end: String(options.replaceConcentrationEffectId)
         };
       }
-      const selected = this.selectedItemActivity(item, options.activityId);
+      const activities = this.usableItemActivities(item);
+      if (activities.length > 1) {
+        recordDnd5eActivityDiagnostic("use", {
+          item: item.name,
+          requestedActivityId: String(options.activityId ?? ""),
+          selectedActivity: selected ? { id: selected.id, name: selected.name, type: selected.type } : null,
+          activitySourceTokenId,
+          followupSpellActivity,
+          useOptions: { ...useOptions },
+          activities: activities.map((entry) => {
+            const data = this.activitySystem(entry.activity);
+            return {
+              id: entry.id,
+              name: entry.name,
+              type: entry.type,
+              activation: data.activation ?? null,
+              target: data.target ?? null,
+              consumption: data.consumption ?? null
+            };
+          })
+        });
+      }
       if (selected?.activity && typeof selected.activity.use === "function") {
         const messageOptions = game.modules.get("midi-qol")?.active ? { systemCard: true } : {};
-        return selected.activity.use(useOptions, {}, messageOptions);
+        let sourceHookId = null;
+        if (activitySourceTokenId && game.modules.get("midi-qol")?.active) {
+          sourceHookId = Hooks.on("midi-qol.targetingComplete", async (workflow) => {
+            if (!workflow || String(workflow.activity?.id ?? "") !== String(selected.id)) return;
+            if (String(workflow.activity?.item?.actor?.id ?? "") !== String(actor?.id ?? "")) return;
+            const sourceToken = canvas?.tokens?.get?.(activitySourceTokenId);
+            if (!sourceToken) return;
+            workflow.token = sourceToken;
+            await workflow.activity?.setupCanSeeSense?.({ workflow });
+          });
+        }
+        try {
+          return await selected.activity.use(useOptions, {}, messageOptions);
+        } finally {
+          if (sourceHookId !== null) Hooks.off("midi-qol.targetingComplete", sourceHookId);
+        }
       }
       return item.use(useOptions);
     }
@@ -731,6 +841,16 @@ export class DnD5eModel extends BaseModel {
       speaker: ChatMessage.getSpeaker({ actor }),
       content: `<p><strong>${escapeHtml(actor.name)}</strong> uses <strong>${escapeHtml(item.name)}</strong>.</p>`
     });
+  }
+
+  itemActivityUsesSpellSlot(item, activityId = "") {
+    if (item?.type !== "spell") return false;
+    const activities = this.usableItemActivities(item);
+    if (activities.length <= 1 || !activityId) return true;
+    const selected = activities.find((entry) => entry.id === String(activityId)) ?? null;
+    const type = String(selected?.type ?? this.activitySystem(selected?.activity)?.type ?? "").toLowerCase();
+    const name = String(selected?.name ?? "").trim().toLowerCase();
+    return type !== "attack" && name !== "attack";
   }
 
   spellSlotChoices(item) {
@@ -1170,6 +1290,8 @@ export class DnD5eModel extends BaseModel {
         || (Array.isArray(healing.parts) ? healing.parts : Object.values(healing.parts ?? {})).length > 0;
     };
     const preferActivityEffects = item?.type === "spell" && itemActivities.some(activityHasEffectRolls);
+    const selectedActivityType = String(this.activitySystem(chosenActivity)?.type ?? chosenActivity?.type ?? "").toLowerCase();
+    const selectedCanAttack = !chosenActivity || selectedActivityType === "attack";
     const push = (entry) => {
       const effectKind = this.rollEffectKind(entry.kind, entry.label, entry.effectType, entry.activity);
       const next = {
@@ -1177,6 +1299,7 @@ export class DnD5eModel extends BaseModel {
         label: cleanRulesText(entry.label ?? "Roll"),
         formula: cleanRulesText(this.resolveDisplayFormula(entry.formula ?? "", actor, item, entry.activity)),
         detail: cleanRulesText(entry.detail ?? ""),
+        activityId: String(entry.activity?.id ?? entry.activity?._id ?? ""),
         scaled: entry.scaled === true,
         workflowAction: entry.workflowAction ?? !!entry.activity,
         rollMode: String(entry.rollMode ?? ""),
@@ -1194,7 +1317,7 @@ export class DnD5eModel extends BaseModel {
       const key = `${next.label}|${next.formula}|${next.detail}`;
       if (!entries.some((existing) => `${existing.label}|${existing.formula}|${existing.detail}` === key)) entries.push(next);
     };
-    if (labels.toHit) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${labels.toHit}`, activity: chosenActivity, ...chosenAttackMode });
+    if (labels.toHit && selectedCanAttack) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${labels.toHit}`, activity: chosenActivity, ...chosenAttackMode });
     if (!preferActivityEffects && labels.damage) push({
       kind: "damage",
       label: "Damage Roll",
@@ -1222,14 +1345,13 @@ export class DnD5eModel extends BaseModel {
       const type = Array.isArray(part) ? part[1] : this.damageTypeLabel(part);
       push({ kind: "damage", label: `${capitalizeWords(type) || "Damage"} Roll`, formula, effectType: type, activity: chosenActivity });
     });
-    if (system.attackBonus) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${signedMod(system.attackBonus)}`, activity: chosenActivity, ...chosenAttackMode });
+    if (system.attackBonus && selectedCanAttack) push({ kind: "attack", label: "Attack Roll", formula: `d20 ${signedMod(system.attackBonus)}`, activity: chosenActivity, ...chosenAttackMode });
     const saveDc = this.readSaveDc(system.save?.dc ?? system.activities?.save?.dc ?? actor?.system?.attributes?.spelldc);
     const saveAbility = fieldText(system.save?.ability, system.save?.dc?.ability, system.save?.dc?.label);
     if (saveDc) push({ kind: "save", label: this.savingThrowLabel(saveAbility), detail: `The target must roll against Difficulty Class ${saveDc}.` });
     const selectedActivityId = String(options.activityId ?? "");
     const selectedActivity = selectedActivityId ? this.selectedItemActivity(item, selectedActivityId)?.activity : null;
-    const selectedHasEffectRolls = selectedActivity ? activityHasEffectRolls(selectedActivity) : false;
-    const instructionActivities = selectedActivity && (!preferActivityEffects || selectedHasEffectRolls) ? [selectedActivity] : itemActivities;
+    const instructionActivities = selectedActivity ? [selectedActivity] : itemActivities;
     for (const activity of instructionActivities) {
       const activityData = this.activitySystem(activity);
       const attack = activityData?.attack ?? {};

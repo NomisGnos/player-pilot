@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.3
+- Ordered each action's target picker from the nearest creature to the farthest and stacked Locate above Target/Out of Range on narrow windows.
+- Replaced CPR's unreliable remote Grapple AppV2 handoff with a repeatable Player Pilot-styled Athletics/Acrobatics/Uncontested prompt, while retaining native-dialog surfacing for other delegated choices and carrying the originating Player Pilot user through CPR use confirmations. Waiting dice screens use compact rounded boxes, can be hidden after six seconds, and automatically move aside after twenty seconds while the action continues in the background.
+- Changed placement-required spells and activities to collect the player's Ping On Map point before starting the GM-side placement task; after the GM receives the ping, the action begins and any remaining roll controls are shown.
+- Fixed PF2E dice overlays and result toasts exposing an escaped roll-card HTML dump; they now show a concise speaker, action, target, and outcome label while omitting GM/owner-only flavor fields.
+- Kept Locate available for out-of-range targets (including while paused), visually muted untargetable portraits and details without dimming Locate, separated Locate's map-pin icon from Target's crosshairs icon, and made Spiritual Weapon: Attack measure and validate its range from the summoned weapon token while retaining the caster's spell-attack statistics.
+- Removed the ten-row target-picker cap so every visible combatant remains available, including defeated combatants, numbered duplicate token names such as Wolf 1, Wolf 2, and Wolf 3, and added a Locate ping beside every target.
+- Restored native Foundry target markers and player-to-GM creature selections by accepting bare v14 token IDs, painting remote markers with the originating player's target color, allowing target updates while paused, and preventing local marker errors from interrupting the socket handoff; ambiguous target data no longer becomes implicit self-targeting.
+- Made safe targetless D&D5e features such as Dash, Disengage, Dodge, and Hide execute from the first Use press when they require no choice, roll, ammunition, or map placement.
+- Separated multi-activity spells such as Spiritual Weapon into distinct cast/place and follow-up attack flows: casting ends at Ping On Map without target or roll prompts, while Attack selects a target, avoids spell-slot consumption, and exposes only that activity's attack and damage controls.
+- Carried the exact D&D5e activity behind each roll preview into AUTO, passed selected token UUIDs directly into Midi-QOL independently of marker rendering, and added scoped console diagnostics for multi-activity uses.
+
 ## v0.3.2
 - Stacked D&D ability scores into one column on phone-width viewports so score and modifier fields no longer overflow or disappear around 431–560px.
 - Prevented Foundry whispers from leaking through Player Pilot's bottom result toast or activity log to users who cannot see the message in normal chat.

@@ -29,3 +29,23 @@ export function tokenFootprintDistanceFeet(a, b, { gridSize = 100, gridDistance 
 
   return (Math.hypot(dx, dy) / size) * distance;
 }
+
+/**
+ * Return a stable nearest-first copy of a token list. Tokens whose distance
+ * cannot be measured remain at the end in their original order.
+ */
+export function sortTokensByDistance(tokens = [], source = null, grid = {}) {
+  if (!source) return Array.from(tokens);
+  return Array.from(tokens)
+    .map((token, index) => ({
+      token,
+      index,
+      distance: tokenFootprintDistanceFeet(source, token, grid)
+    }))
+    .sort((left, right) => {
+      const leftDistance = Number.isFinite(left.distance) ? left.distance : Number.POSITIVE_INFINITY;
+      const rightDistance = Number.isFinite(right.distance) ? right.distance : Number.POSITIVE_INFINITY;
+      return (leftDistance - rightDistance) || (left.index - right.index);
+    })
+    .map((entry) => entry.token);
+}

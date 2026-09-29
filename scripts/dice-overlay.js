@@ -1,12 +1,50 @@
-import { capitalizeWords, escapeHtml, signedMod } from "./utils.js";
+import { capitalizeWords, cleanRulesText, escapeHtml, signedMod } from "./utils.js";
 
 const MODULE_ID = "player-pilot";
 const ROLL_REQUEST_TYPES = new Set(["useItem", "rollCheck", "formulaRoll", "dnd5eAutoRoll", "pf2eStrike", "pf2eItemRoll"]);
 const themes = new Map();
 const pending = new Map();
+const WAIT_DISMISS_DELAY_MS = 6000;
+const WAIT_AUTO_HIDE_MS = 20000;
 
 let getActorId = () => "";
 let removeTimer = null;
+
+function removeRestrictedRollMarkup(value) {
+  return String(value ?? "").replace(
+    /<([a-z][\w-]*)\b[^>]*data-visibility=["'](?:gm|owner)["'][^>]*>[\s\S]*?<\/\1>/gi,
+    " "
+  );
+}
+
+function visibleRollText(value, maxLength = 180) {
+  const raw = removeRestrictedRollMarkup(value).trim();
+  if (!raw) return "";
+  if (!/[<>]/.test(raw) || typeof globalThis.document?.createElement !== "function") {
+    return cleanRulesText(raw).slice(0, maxLength);
+  }
+  const root = document.createElement("div");
+  root.innerHTML = raw;
+  root.querySelectorAll('[data-visibility="gm"], [data-visibility="owner"]').forEach((element) => element.remove());
+  return cleanRulesText(root.textContent ?? "").slice(0, maxLength);
+}
+
+export function rollMessageLabel(message) {
+  const rawFlavor = String(message?.flavor ?? "");
+  if (!/[<>]/.test(rawFlavor) || typeof globalThis.document?.createElement !== "function") {
+    return visibleRollText(rawFlavor || message?.alias || message?.speaker?.alias || "Roll") || "Roll";
+  }
+  const root = document.createElement("div");
+  root.innerHTML = rawFlavor;
+  root.querySelectorAll('[data-visibility="gm"], [data-visibility="owner"]').forEach((element) => element.remove());
+  const action = visibleRollText(root.querySelector("h4.action strong, h4 strong, .action strong")?.textContent ?? "");
+  const target = visibleRollText(root.querySelector(".target-dc")?.textContent ?? "");
+  const result = visibleRollText(root.querySelector(".result")?.textContent ?? "");
+  const details = [action, target, result].filter((entry, index, entries) => entry && entries.indexOf(entry) === index).join(" — ")
+    || visibleRollText(root.textContent ?? "");
+  const speaker = visibleRollText(message?.speaker?.alias ?? message?.alias ?? "", 60);
+  return cleanRulesText([speaker, details].filter(Boolean).join(": ")).slice(0, 220) || "Roll";
+}
 
 function registerBuiltInThemes() {
   registerDiceTheme("classic", { label: "Classic", className: "pp-dice-theme-classic" });
@@ -342,6 +380,35 @@ function dismissOverlay(overlay, removeDelay = 550) {
   }, removeDelay);
 }
 
+export function hideWaitingDiceOverlay() {
+  const overlay = overlayElement();
+  if (!(overlay instanceof HTMLElement) || !overlay.classList.contains("pp-dice-rolling")) return false;
+  dismissOverlay(overlay, 180);
+  return true;
+}
+
+function armWaitingOverlayEscape(overlay, request) {
+  const button = overlay.querySelector("[data-dismiss-waiting-overlay]");
+  if (!(button instanceof HTMLButtonElement)) return;
+  const startedAt = Number(request.startedAt ?? Date.now());
+  const update = () => {
+    if (!overlay.isConnected || !overlay.classList.contains("pp-dice-rolling")) return;
+    const elapsed = Date.now() - startedAt;
+    const remaining = Math.max(0, Math.ceil((WAIT_DISMISS_DELAY_MS - elapsed) / 1000));
+    button.disabled = remaining > 0;
+    button.textContent = remaining > 0 ? `Hide in ${remaining}s` : "Hide waiting screen";
+    if (elapsed >= WAIT_AUTO_HIDE_MS) {
+      dismissOverlay(overlay, 180);
+      return;
+    }
+    const nextBoundary = remaining > 0
+      ? WAIT_DISMISS_DELAY_MS - elapsed
+      : WAIT_AUTO_HIDE_MS - elapsed;
+    window.setTimeout(update, Math.min(1000, Math.max(100, nextBoundary)));
+  };
+  update();
+}
+
 function buildOverlay(request) {
   removeTimer && window.clearTimeout(removeTimer);
   removeTimer = null;
@@ -353,18 +420,31 @@ function buildOverlay(request) {
   overlay.dataset.requestId = request.id;
   overlay.style.setProperty("--pp-dice-color", color);
   overlay.style.setProperty("--pp-dice-contrast", contrastColor(color));
+  const requestTitle = visibleRollText(request.label) || "Roll";
   overlay.innerHTML = `
     <div class="pp-dice-backdrop"></div>
     <div class="pp-dice-presentation">
       <div class="pp-dice-kicker">PLAYER PILOT</div>
-      <div class="pp-dice-title">${escapeHtml(request.label)}</div>
+      <div class="pp-dice-title">${escapeHtml(requestTitle)}</div>
       <div class="pp-dice-tray" aria-hidden="true"></div>
-      <div class="pp-dice-wait"><i class="fas fa-satellite-dish"></i><span>Waiting for GM</span><b aria-hidden="true"><i>.</i><i>.</i><i>.</i></b></div>
+      <div class="pp-dice-wait">
+        <span class="pp-dice-wait-status"><i class="fas fa-satellite-dish"></i><span>Waiting for GM</span><b aria-hidden="true"><i>.</i><i>.</i><i>.</i></b></span>
+        <button class="pp-dice-wait-dismiss" type="button" data-dismiss-waiting-overlay disabled>Hide in 6s</button>
+      </div>
       <div class="pp-dice-results" aria-live="assertive"></div>
     </div>`;
   const blockOverlayInput = (event) => {
     if (event.cancelable) event.preventDefault();
     event.stopPropagation();
+    const dismissButton = event.target instanceof HTMLElement
+      ? event.target.closest("[data-dismiss-waiting-overlay]")
+      : null;
+    if (["pointerup", "touchend", "click"].includes(event.type)
+      && dismissButton instanceof HTMLButtonElement
+      && !dismissButton.disabled) {
+      dismissOverlay(overlay, 180);
+      return;
+    }
     if (["pointerup", "touchend", "click"].includes(event.type) && overlay.classList.contains("pp-dice-settled")) {
       dismissOverlay(overlay);
     }
@@ -375,6 +455,7 @@ function buildOverlay(request) {
   const tray = overlay.querySelector(".pp-dice-tray");
   request.sides.forEach((sides, index) => tray.append(makeDie({ sides, index })));
   document.body.appendChild(overlay);
+  armWaitingOverlayEscape(overlay, request);
   return overlay;
 }
 
@@ -633,7 +714,7 @@ export function captureDiceRollMessage(message) {
   if (actorId && actorId !== String(getActorId() ?? "")) return;
   const localRequest = {
     id: `message-${message.id ?? foundry.utils.randomID()}`,
-    label: String(message.flavor ?? message.alias ?? "Roll"),
+    label: rollMessageLabel(message),
     actorId,
     sides: resultDice(summaries).map((die) => die.faces).slice(0, 6),
     rolls: summaries,
