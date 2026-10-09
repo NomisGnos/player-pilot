@@ -34,7 +34,7 @@ export class PlayerPilotShell extends HandlebarsApplicationMixin(ApplicationV2) 
 
         for (const t of this.element.querySelectorAll(`.pp-tab`)) {
           t.classList.toggle("active", t.dataset.tab === tab);
-          if (foundry.utils.isElementInstanceOf(t, "button")) t.ariaSelected = `${t.dataset.tab === tab}`;
+          if (t instanceof HTMLButtonElement) t.ariaSelected = `${t.dataset.tab === tab}`;
         }
 
         for (const section of this.element.querySelectorAll(`.tab`)) {
