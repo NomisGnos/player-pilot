@@ -13,7 +13,9 @@ It is meant for players using a phone or tablet at the table. Players still log 
 
 ## Installation
 
-Install this module from Foundry's **Add-on Modules** screen using the manifest URL:
+Install this module from Foundry's **Add-on Modules** and search for **Player Pilot** (we are published on Foundry's Add-On), 
+
+Or use the manifest URL:
 
 ```text
 https://github.com/NomisGnos/player-pilot/releases/latest/download/module.json
